@@ -145,6 +145,31 @@ only the manual menu action surfaces those. Dismissing a banner with the **×**
 remembers that version, so launch checks will not raise it again (a newer
 version still will, and a manual check always shows what it finds).
 
+### Commit messages
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
+a **short imperative subject**, with the detail in the **body**.
+
+```
+feat: check for updates at launch
+
+Runs a few seconds after start, at most once per day, cached in
+settings.last_update_check. Silent when up to date or on a network
+failure; only the manual menu action reports those. Adds a dismiss button
+that records skipped_version, so launch checks stop raising it.
+```
+
+The subject's type drives the release notes: `feat`, `fix`, `perf`, `docs` and
+`refactor` each get their own section, and everything else lands under
+"Maintenance".
+
+### Release notes
+
+GitHub's own generator only lists pull requests, and this project pushes
+straight to `main`, so the workflow builds the notes instead:
+`scripts/release-notes.ps1` groups the commits between the previous tag and the
+new one and writes the release body.
+
 ## Development
 
 Linting follows the strict settings in `[lints]` (`clippy::all` denied,
