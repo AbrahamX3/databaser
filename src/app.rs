@@ -23,6 +23,7 @@ use crate::elevation::{self, ActionOutcome, ControlMode};
 use crate::helper_task::{self, TaskError};
 use crate::services::{self, ServiceAction, ServiceInfo, ServiceKind, ServiceState};
 use crate::settings::{Settings, ThemePreference};
+use crate::update;
 
 /// How often the service states are re-read while the window is open.
 const POLL_INTERVAL: Duration = Duration::from_millis(2000);
@@ -34,6 +35,17 @@ enum ToastKind {
     Success,
     Warning,
     Error,
+}
+
+/// Progress of an in-app update check / install.
+#[derive(Debug, Default)]
+enum UpdateState {
+    #[default]
+    Idle,
+    Checking,
+    Available(String),
+    Installing(String),
+    ReadyToRestart(String),
 }
 
 pub struct Databaser {
@@ -51,6 +63,7 @@ pub struct Databaser {
     theme: ThemePreference,
     settings: Settings,
     toasts: Vec<(ToastKind, String)>,
+    update: UpdateState,
 }
 
 impl Databaser {
@@ -66,6 +79,7 @@ impl Databaser {
             theme: settings.theme,
             settings,
             toasts: Vec::new(),
+            update: UpdateState::Idle,
         };
 
         // Discovery, the elevation-mode probe, and state polling all touch
@@ -292,6 +306,165 @@ impl Databaser {
         self.toasts.push((kind, message));
     }
 
+    // ---- updates ---------------------------------------------------------
+
+    /// Check GitHub Releases for a newer version (off the UI thread).
+    fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.update, UpdateState::Checking | UpdateState::Installing(_)) {
+            return;
+        }
+        self.update = UpdateState::Checking;
+        cx.notify();
+
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async { update::check() })
+                .await;
+
+            entity
+                .update(cx, |this, cx| {
+                    match result {
+                        Ok(Some(version)) => this.update = UpdateState::Available(version),
+                        Ok(None) => {
+                            this.update = UpdateState::Idle;
+                            this.push_toast(
+                                ToastKind::Success,
+                                format!(
+                                    "Databaser v{} is the latest version.",
+                                    env!("CARGO_PKG_VERSION")
+                                ),
+                            );
+                        }
+                        Err(error) => {
+                            this.update = UpdateState::Idle;
+                            this.push_toast(ToastKind::Error, error.to_string());
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Download and install the available update (off the UI thread).
+    ///
+    /// The running process keeps using the old binary until it restarts, so we
+    /// surface a "Restart" step rather than relaunching underneath the user.
+    fn install_update(&mut self, cx: &mut Context<Self>) {
+        let UpdateState::Available(version) = &self.update else {
+            return;
+        };
+        self.update = UpdateState::Installing(version.clone());
+        cx.notify();
+
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async { update::install() })
+                .await;
+
+            entity
+                .update(cx, |this, cx| {
+                    match result {
+                        Ok(Some(version)) => {
+                            this.push_toast(
+                                ToastKind::Success,
+                                format!("Updated to v{version}. Restart to finish."),
+                            );
+                            this.update = UpdateState::ReadyToRestart(version);
+                        }
+                        Ok(None) => {
+                            this.update = UpdateState::Idle;
+                            this.push_toast(
+                                ToastKind::Success,
+                                "Already up to date.".to_string(),
+                            );
+                        }
+                        Err(error) => {
+                            this.update = UpdateState::Idle;
+                            this.push_toast(ToastKind::Error, error.to_string());
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// The update banner, if there is anything to say about updates.
+    fn update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let row = match &self.update {
+            UpdateState::Idle | UpdateState::Checking => return None,
+            UpdateState::Available(version) => {
+                let text = format!("Databaser v{version} is available.");
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .child(icon(IconName::Download))
+                    .child(div().flex_grow(1.0).text_sm().child(text))
+                    .child(
+                        Button::new("update-install")
+                            .small()
+                            .primary()
+                            .label("Install and restart")
+                            .on_click(cx.listener(|this, _, _window, cx| this.install_update(cx))),
+                    )
+            }
+            UpdateState::Installing(version) => {
+                let text = format!("Installing v{version}\u{2026}");
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .child(Spinner::new().small())
+                    .child(div().flex_grow(1.0).text_sm().child(text))
+            }
+            UpdateState::ReadyToRestart(version) => {
+                let text = format!("Updated to v{version}. Restart to finish.");
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .child(icon(IconName::Download))
+                    .child(div().flex_grow(1.0).text_sm().child(text))
+                    .child(
+                        Button::new("update-restart")
+                            .small()
+                            .primary()
+                            .label("Restart")
+                            .on_click(cx.listener(|this, _, _window, cx| this.restart_app(cx))),
+                    )
+            }
+        };
+
+        Some(
+            div()
+                .px(px(28.))
+                .pt(px(20.))
+                .child(
+                    row.px(px(18.))
+                        .py(px(14.))
+                        .rounded_lg()
+                        .bg(cx.theme().secondary)
+                        .border_1()
+                        .border_color(cx.theme().border),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Relaunch with the freshly installed binary.
+    fn restart_app(&mut self, cx: &mut Context<Self>) {
+        cx.restart();
+    }
+
     fn set_theme(&mut self, pref: ThemePreference, window: &mut Window, cx: &mut Context<Self>) {
         if self.theme == pref {
             return;
@@ -441,6 +614,16 @@ impl Databaser {
                     .separator();
 
                 menu.item(
+                    PopupMenuItem::new("Check for updates")
+                        .icon(icon(IconName::Download))
+                        .on_click({
+                            let entity = entity.clone();
+                            move |_, _, cx| {
+                                entity.update(cx, Databaser::check_for_updates);
+                            }
+                        }),
+                )
+                .item(
                     PopupMenuItem::new("About Databaser")
                         .icon(icon(IconName::Info))
                         .on_click(|_, window, cx| open_about(window, cx)),
@@ -609,6 +792,10 @@ impl Render for Databaser {
 
         if let Some(message) = self.error.as_deref() {
             root = root.child(self.error_banner(message));
+        }
+
+        if let Some(banner) = self.update_banner(cx) {
+            root = root.child(banner);
         }
 
         root.child(div().flex_1().overflow_hidden().child(body))

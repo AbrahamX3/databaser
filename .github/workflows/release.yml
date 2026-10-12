@@ -1,0 +1,46 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # The asset name must contain the target triple: the in-app updater
+      # (self_update) matches release assets by looking for the target string,
+      # and extracts `databaser.exe` from the archive root.
+      - name: Package
+        shell: pwsh
+        run: |
+          $target = "x86_64-pc-windows-msvc"
+          $asset = "databaser-$target.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target/release/databaser.exe -DestinationPath "dist/$asset" -Force
+          $hash = (Get-FileHash "dist/$asset" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Set-Content dist/SHA256SUMS -Encoding ascii
+          Get-Content dist/SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/databaser-x86_64-pc-windows-msvc.zip
+            dist/SHA256SUMS
+          generate_release_notes: true

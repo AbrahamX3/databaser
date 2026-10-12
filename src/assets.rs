@@ -32,6 +32,7 @@ icon_assets!(
         Monitor,
         Sun,
         Moon,
+        Download,
     ]
 );
 

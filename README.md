@@ -99,6 +99,33 @@ into the executable by `build.rs` — that is what Windows shows in the **title
 bar, taskbar and Alt-Tab**. Both files are committed and need no tooling to
 build.
 
+## Releases and updates
+
+Releases are built by CI. Pushing a tag triggers
+`.github/workflows/release.yml`, which builds the release binary on
+`windows-latest` and publishes two assets to the GitHub Release:
+
+- `databaser-x86_64-pc-windows-msvc.zip` — contains `databaser.exe`
+- `SHA256SUMS` — the archive's SHA-256
+
+The asset name includes the target triple because the in-app updater
+(`self_update`) matches release assets by target.
+
+To cut a release, bump `version` in `Cargo.toml` and push a matching tag:
+
+```powershell
+# edit Cargo.toml: version = "0.2.0"
+cargo build --release    # refreshes Cargo.lock
+git commit -am "chore: release v0.2.0"
+git tag v0.2.0
+git push && git push --tags
+```
+
+In the app, **Menu → Check for updates** asks GitHub Releases whether a newer
+version exists (verified against `SHA256SUMS` before installing). Installing
+replaces the executable; the running process keeps the old binary until it is
+restarted, so the app then offers **Restart**.
+
 ## Development
 
 Linting follows the strict settings in `[lints]` (`clippy::all` denied,

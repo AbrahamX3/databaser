@@ -11,6 +11,7 @@ mod elevation;
 mod helper_task;
 mod services;
 mod settings;
+mod update;
 
 use gpui_kit::*;
 
