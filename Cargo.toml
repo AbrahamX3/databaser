@@ -1,6 +1,6 @@
 [package]
 name = "databaser"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Start, stop and restart local MySQL, PostgreSQL and SQL Server services"
 license = "MIT"

@@ -1,8 +1,13 @@
-// Databaser — start, stop and restart local MySQL and PostgreSQL services.
+// Databaser - start, stop and restart local MySQL and PostgreSQL services.
 //
 // Two entry points share one binary:
 //   * normal:   the GPUI window (unelevated)
 //   * `--ctl`:  a short-lived elevated helper that performs one SCM action
+
+// Build as a GUI app rather than a console app, so Windows never allocates a
+// console window: not for the main window, and not for the short-lived elevated
+// helper processes (they report results through files and exit codes).
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod app;
 mod assets;
@@ -14,6 +19,7 @@ mod settings;
 mod update;
 
 use gpui_kit::*;
+use std::io::Write as _;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -36,7 +42,9 @@ fn main() {
                 let settings = settings.clone();
                 cx.new(move |cx| app::Databaser::new(settings, cx))
             }) {
-                eprintln!("Databaser: failed to open window: {error}");
+                // Best-effort: a GUI-subsystem build may have no console at all,
+                // and `eprintln!` would panic on an invalid handle.
+                let _ = writeln!(std::io::stderr(), "Databaser: failed to open window: {error}");
             }
         });
 }
