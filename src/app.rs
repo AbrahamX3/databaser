@@ -24,7 +24,7 @@ use gpui_kit::*;
 use crate::assets::APP_ICON;
 use crate::elevation::{self, ActionOutcome, ControlMode};
 use crate::helper_task::{self, TaskError};
-use crate::services::{self, ServiceAction, ServiceInfo, ServiceKind, ServiceState};
+use crate::services::{self, ServiceAction, ServiceInfo, ServiceKind, ServiceState, StartType};
 use crate::settings::{Settings, ThemePreference};
 use crate::update;
 
@@ -271,6 +271,27 @@ impl Databaser {
         if self.busy.is_some() {
             return;
         }
+
+        // Windows refuses to start a disabled service and the SCM reports it as
+        // the opaque "cannot accept the request in its current state". Say what
+        // is actually wrong, and where the fix is.
+        if action == ServiceAction::Start
+            && self
+                .services
+                .iter()
+                .any(|service| service.name == name && service.start_type == StartType::Disabled)
+        {
+            self.push_toast(
+                ToastKind::Warning,
+                format!(
+                    "`{name}` is disabled, so Windows will not start it. \
+                     Enable it from Details \u{2192} Start-up."
+                ),
+            );
+            cx.notify();
+            return;
+        }
+
         let mode = self.mode;
         self.busy = Some(name.clone());
         self.busy_action = Some(action);
@@ -289,10 +310,26 @@ impl Databaser {
                     this.busy_action = None;
 
                     match outcome {
-                        ActionOutcome::Done => this.push_toast(
-                            ToastKind::Success,
-                            format!("{} {}", action.done_label(), name),
-                        ),
+                        ActionOutcome::Done => {
+                            // Reflect the new start type immediately; the poll
+                            // only re-reads states, not configuration.
+                            if let ServiceAction::SetStartType(start_type) = action {
+                                if let Some(service) =
+                                    this.services.iter_mut().find(|service| service.name == name)
+                                {
+                                    service.start_type = start_type;
+                                }
+                                this.push_toast(
+                                    ToastKind::Success,
+                                    format!("{name} \u{2014} {}", start_type.effect()),
+                                );
+                            } else {
+                                this.push_toast(
+                                    ToastKind::Success,
+                                    format!("{} {}", action.done_label(), name),
+                                );
+                            }
+                        }
                         ActionOutcome::Cancelled => this.push_toast(
                             ToastKind::Warning,
                             format!(
@@ -809,7 +846,7 @@ impl Databaser {
                         can_act,
                         cx,
                     ))
-                    .child(details_popover(info)),
+                    .child(details_popover(info, cx)),
             );
 
         let core = div()
@@ -1078,16 +1115,19 @@ fn kind_color(kind: ServiceKind) -> Rgba {
 }
 
 /// Shorthand for an icon from the shared catalog.
-/// A ghost "Details" button that opens a read-only popover describing the service.
+/// A ghost "Details" button that opens a popover describing the service, and
+/// letting its start type be changed.
 ///
 /// The popover is content-sized: it clamps to the window rather than flipping, so
 /// the trigger's anchor keeps it inside the card's column.
-fn details_popover(info: &ServiceInfo) -> impl IntoElement {
+fn details_popover(info: &ServiceInfo, cx: &mut Context<Databaser>) -> impl IntoElement {
+    let entity = cx.entity();
     let name = info.name.clone();
     let display_name = info.display_name.clone();
     let executable_path = info.executable_path.clone();
     let kind = info.kind;
     let state = info.state;
+    let start_type = info.start_type;
 
     Popover::new(format!("details-{}", info.name))
         .anchor(Anchor::TopRight)
@@ -1098,14 +1138,69 @@ fn details_popover(info: &ServiceInfo) -> impl IntoElement {
                 .ghost(),
         )
         .content(move |_state, _window, _cx| {
+            let menu_entity = entity.clone();
+            let menu_service = name.clone();
+            let startup = Button::new(format!("startup-{}", name))
+                .label(start_type.label())
+                .outline()
+                .small()
+                .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                    menu.check_side(Side::Right)
+                        .item(start_type_item(
+                            "Automatic",
+                            StartType::Automatic,
+                            start_type,
+                            &menu_service,
+                            &menu_entity,
+                        ))
+                        .item(start_type_item(
+                            "Manual",
+                            StartType::Manual,
+                            start_type,
+                            &menu_service,
+                            &menu_entity,
+                        ))
+                        .item(start_type_item(
+                            "Disabled",
+                            StartType::Disabled,
+                            start_type,
+                            &menu_service,
+                            &menu_entity,
+                        ))
+                });
+
             div().max_w(px(420.)).child(
                 DescriptionList::new()
                     .child(DescriptionItem::new("Service").value(display_name.as_str()))
                     .child(DescriptionItem::new("Service name").value(name.as_str()))
                     .child(DescriptionItem::new("Type").value(kind.label()))
                     .child(DescriptionItem::new("State").value(state.label()))
+                    .child(DescriptionItem::new("Start-up").value(startup.into_any_element()))
                     .child(DescriptionItem::new("Binary").value(executable_path.as_str())),
             )
+        })
+}
+
+/// One start type in the popover's start-up menu, ticked when it is current.
+fn start_type_item(
+    label: &str,
+    start_type: StartType,
+    current: StartType,
+    service: &str,
+    entity: &Entity<Databaser>,
+) -> PopupMenuItem {
+    let entity = entity.clone();
+    let service = service.to_string();
+    PopupMenuItem::new(label)
+        .checked(current == start_type)
+        .on_click(move |_, _, cx| {
+            entity.update(cx, |this, cx| {
+                this.request_action(
+                    service.clone(),
+                    ServiceAction::SetStartType(start_type),
+                    cx,
+                );
+            });
         })
 }
 

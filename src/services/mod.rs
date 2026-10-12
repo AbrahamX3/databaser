@@ -6,5 +6,5 @@ mod model;
 mod scm;
 
 pub use control::run_action;
-pub use model::{ServiceAction, ServiceInfo, ServiceKind, ServiceState};
+pub use model::{ServiceAction, ServiceInfo, ServiceKind, ServiceState, StartType};
 pub use scm::{discover, query_states};

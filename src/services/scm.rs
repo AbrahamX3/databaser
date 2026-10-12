@@ -5,8 +5,10 @@
 //! executed by the elevated helper.
 
 use super::error::ServiceError;
-use super::model::{ServiceInfo, ServiceKind, ServiceState};
-use windows_service::service::{ServiceAccess, ServiceState as WinState};
+use super::model::{ServiceInfo, ServiceKind, ServiceState, StartType};
+use windows_service::service::{
+    ServiceAccess, ServiceStartType as WinStartType, ServiceState as WinState,
+};
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
 /// Enumerate every installed service, keep the MySQL/MariaDB and PostgreSQL
@@ -38,6 +40,15 @@ pub fn discover() -> Result<Vec<ServiceInfo>, ServiceError> {
             .query_status()
             .map_or(ServiceState::Stopped, |status| convert_state(status.current_state));
 
+        let start_type = match config.start_type {
+            WinStartType::AutoStart => StartType::Automatic,
+            WinStartType::Disabled => StartType::Disabled,
+            // `OnDemand` is Manual. `SystemStart` and `BootStart` are driver-only
+            // and cannot apply to a database service; report them as Manual
+            // rather than inventing a state the UI cannot set back.
+            _ => StartType::Manual,
+        };
+
         found.push(ServiceInfo {
             display_name: if display_name.is_empty() {
                 name.clone()
@@ -48,6 +59,7 @@ pub fn discover() -> Result<Vec<ServiceInfo>, ServiceError> {
             executable_path,
             kind,
             state,
+            start_type,
         });
     }
 
