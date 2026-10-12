@@ -138,6 +138,13 @@ version exists (verified against `SHA256SUMS` before installing). Installing
 replaces the executable; the running process keeps the old binary until it is
 restarted, so the app then offers **Restart**.
 
+Databaser also checks **automatically a few seconds after launch, at most once a
+day** (the last check is cached in `settings.json`). The automatic check is
+silent: it reports nothing when there is no update and ignores network errors —
+only the manual menu action surfaces those. Dismissing a banner with the **×**
+remembers that version, so launch checks will not raise it again (a newer
+version still will, and a manual check always shows what it finds).
+
 ## Development
 
 Linting follows the strict settings in `[lints]` (`clippy::all` denied,

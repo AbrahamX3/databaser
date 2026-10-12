@@ -28,6 +28,9 @@ use crate::update;
 /// How often the service states are re-read while the window is open.
 const POLL_INTERVAL: Duration = Duration::from_millis(2000);
 
+/// Delay before the automatic launch update check, so start-up stays snappy.
+const AUTO_CHECK_DELAY: Duration = Duration::from_secs(6);
+
 const GITHUB_URL: &str = "github.com/abraham/databaser";
 
 #[derive(Clone, Copy)]
@@ -88,6 +91,7 @@ impl Databaser {
         Self::spawn_discovery(cx);
         Self::spawn_mode_probe(cx);
         Self::spawn_poll(cx);
+        Self::spawn_auto_update_check(cx);
 
         this
     }
@@ -308,13 +312,19 @@ impl Databaser {
 
     // ---- updates ---------------------------------------------------------
 
-    /// Check GitHub Releases for a newer version (off the UI thread).
-    fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+    /// Ask GitHub Releases whether a newer version exists.
+    ///
+    /// `manual` is the Menu action: it always reports a result (including "up to
+    /// date" and errors). The automatic launch check is cached, stays silent on
+    /// failure, and respects a dismissed version.
+    fn check_updates(&mut self, cx: &mut Context<Self>, manual: bool) {
         if matches!(self.update, UpdateState::Checking | UpdateState::Installing(_)) {
             return;
         }
         self.update = UpdateState::Checking;
         cx.notify();
+
+        let skipped = self.settings.skipped_version.clone();
 
         cx.spawn(async move |entity, cx| {
             let result = cx
@@ -324,21 +334,35 @@ impl Databaser {
 
             entity
                 .update(cx, |this, cx| {
+                    this.settings.record_update_check();
+                    this.settings.save();
+
                     match result {
-                        Ok(Some(version)) => this.update = UpdateState::Available(version),
+                        Ok(Some(version)) => {
+                            this.update =
+                                if should_offer_update(manual, &version, skipped.as_deref()) {
+                                    UpdateState::Available(version)
+                                } else {
+                                    UpdateState::Idle
+                                };
+                        }
                         Ok(None) => {
                             this.update = UpdateState::Idle;
-                            this.push_toast(
-                                ToastKind::Success,
-                                format!(
-                                    "Databaser v{} is the latest version.",
-                                    env!("CARGO_PKG_VERSION")
-                                ),
-                            );
+                            if manual {
+                                this.push_toast(
+                                    ToastKind::Success,
+                                    format!(
+                                        "Databaser v{} is the latest version.",
+                                        env!("CARGO_PKG_VERSION")
+                                    ),
+                                );
+                            }
                         }
                         Err(error) => {
                             this.update = UpdateState::Idle;
-                            this.push_toast(ToastKind::Error, error.to_string());
+                            if manual {
+                                this.push_toast(ToastKind::Error, error.to_string());
+                            }
                         }
                     }
                     cx.notify();
@@ -346,6 +370,31 @@ impl Databaser {
                 .ok();
         })
         .detach();
+    }
+
+    /// Check once shortly after launch, at most once a day.
+    fn spawn_auto_update_check(cx: &mut Context<Self>) {
+        cx.spawn(async move |entity, cx| {
+            // Let service discovery and the first frames settle first.
+            cx.background_executor().timer(AUTO_CHECK_DELAY).await;
+
+            entity
+                .update(cx, |this, cx| {
+                    if this.settings.update_check_due() {
+                        this.check_updates(cx, false);
+                    }
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Remember the dismissed version so the banner does not come back for it.
+    fn dismiss_update(&mut self, version: String, cx: &mut Context<Self>) {
+        self.settings.skipped_version = Some(version);
+        self.settings.save();
+        self.update = UpdateState::Idle;
+        cx.notify();
     }
 
     /// Download and install the available update (off the UI thread).
@@ -413,6 +462,19 @@ impl Databaser {
                             .primary()
                             .label("Install and restart")
                             .on_click(cx.listener(|this, _, _window, cx| this.install_update(cx))),
+                    )
+                    .child(
+                        Button::new("update-dismiss")
+                            .ghost()
+                            .small()
+                            .icon(icon(IconName::X))
+                            .tooltip("Skip this version")
+                            .on_click({
+                                let version = version.clone();
+                                cx.listener(move |this, _, _window, cx| {
+                                    this.dismiss_update(version.clone(), cx)
+                                })
+                            }),
                     )
             }
             UpdateState::Installing(version) => {
@@ -619,7 +681,7 @@ impl Databaser {
                         .on_click({
                             let entity = entity.clone();
                             move |_, _, cx| {
-                                entity.update(cx, Databaser::check_for_updates);
+                                entity.update(cx, |this, cx| this.check_updates(cx, true));
                             }
                         }),
                 )
@@ -1036,11 +1098,44 @@ fn flush_toasts(
     }
 }
 
+/// Whether an available version should be surfaced to the user.
+///
+/// A manual check always reports what it found, including a version the user
+/// dismissed earlier; the automatic launch check stays quiet about it.
+fn should_offer_update(manual: bool, available: &str, skipped: Option<&str>) -> bool {
+    manual || skipped != Some(available)
+}
+
 /// Apply a three-way theme preference to the global theme.
 pub fn apply_theme(pref: ThemePreference, window: Option<&mut Window>, cx: &mut App) {
     match pref {
         ThemePreference::Light => Theme::change(ThemeMode::Light, window, cx),
         ThemePreference::Dark => Theme::change(ThemeMode::Dark, window, cx),
         ThemePreference::System => Theme::sync_system_appearance(window, cx),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_offer_update;
+
+    #[test]
+    fn manual_check_offers_any_available_version() {
+        assert!(should_offer_update(true, "0.2.0", None));
+    }
+
+    #[test]
+    fn automatic_check_offers_a_newer_version() {
+        assert!(should_offer_update(false, "0.2.0", Some("0.1.9")));
+    }
+
+    #[test]
+    fn automatic_check_stays_quiet_for_a_skipped_version() {
+        assert!(!should_offer_update(false, "0.2.0", Some("0.2.0")));
+    }
+
+    #[test]
+    fn manual_check_still_offers_a_skipped_version() {
+        assert!(should_offer_update(true, "0.2.0", Some("0.2.0")));
     }
 }
