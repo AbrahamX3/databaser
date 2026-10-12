@@ -3,7 +3,8 @@
 # Databaser
 
 A small Windows desktop app for starting, stopping and restarting your local
-**MySQL** and **PostgreSQL** services without opening Task Manager or Services.
+**MySQL**, **PostgreSQL** and **SQL Server** services — and for deciding how
+they start — without opening Task Manager or Services.
 
 Built in Rust with [GPUI Kit](https://gpui-kit.com) (`gpui-kit` 0.7.1).
 
@@ -19,13 +20,50 @@ Built in Rust with [GPUI Kit](https://gpui-kit.com) (`gpui-kit` 0.7.1).
 - Per service:
   - **Stopped** → `Start`
   - **Running** → `Stop` and `Restart`
+  - **Details** → a popover with the display name, SCM name, engine type,
+    installed **version**, current state, **listening ports**, start-up type and
+    the binary path.
+  - **Start-up** → *Automatic* / *Manual* / *Disabled*. Manual means "do not
+    start at boot, but I can start it"; Disabled means Windows will not start it
+    at all. Only the start type changes — nothing else about the service is
+    touched.
   - While an action runs the buttons are replaced by a spinner.
 - A single **Menu** holds everything else:
   - **Rescan**
+  - **Start Databaser with Windows** (off by default)
+  - **Run in background (minimize to tray)** (off by default)
   - **Theme** → *System* (follows Windows) / *Light* / *Dark*, remembered between
     launches and ticking the active choice
   - **Advanced** → *Enable no-prompt control* / *Remove elevated control*
-  - **About Databaser** → a dialog with the icon, name, version and source link
+  - **Check for updates**, **About Databaser**
+
+Starting a service that is disabled says so and points at the fix, rather than
+passing on the Service Control Manager's opaque "cannot accept the request in
+its current state".
+
+## Background and sign-in
+
+Both are opt-in and stored per user.
+
+- **Run in background** keeps the tray icon present and makes closing the window
+  *hide* Databaser instead of exiting it: it keeps polling, and the tray icon
+  (or its **Open Databaser** item) brings it back. Its **Quit** item exits for
+  real. With the option off, closing the window exits as usual.
+- **Start Databaser with Windows** writes a single per-user `Run` entry:
+
+  ```
+  HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+    Databaser = "C:\…\databaser.exe" --startup
+  ```
+
+  That needs no administrator rights, so the toggle never prompts. The registry
+  is the source of truth: the menu reads it back, so turning the entry off from
+  Task Manager → Startup apps is reflected in the app. With background mode also
+  on, `--startup` makes the app come up hidden in the tray rather than opening a
+  window.
+
+Only one copy of Databaser runs at a time. A second launch brings the existing
+window to the front and exits, which matters once starting with Windows is on.
 
 ## Install
 
@@ -78,29 +116,40 @@ After that the GUI stays unelevated: each Start/Stop writes a request file to
 `%LOCALAPPDATA%\Databaser\ctl-request.json`, runs the task, and reads the
 helper's reply from `ctl-response.json`. No more prompts.
 
-The current mode is shown next to the version in the header
-(`prompt per action` / `no-prompt control` / `elevated`). If the executable is
-moved or rebuilt, the task is detected as stale and the setup button returns.
-Removing the task (Task Scheduler, or `schtasks /delete /tn DatabaserElevatedControl`)
-reverts to the per-action prompt.
+Which mode is in force is reflected in **Advanced**: *Enable no-prompt control*
+is only offered while the per-action prompt is in use, and *Remove elevated
+control* only while the task exists. If the executable is moved or rebuilt the
+task is detected as stale and the setup item comes back. Removing the task (Task
+Scheduler, or `schtasks /delete /tn DatabaserElevatedControl`) reverts to the
+per-action prompt.
+
+Changing a service's **start-up type** needs the same rights as starting it, so
+it travels the same three paths — including the no-prompt task, which is another
+reason to enable it.
 
 ## Project layout
 
 ```
 src/
-  main.rs        # entry point; dispatches GUI vs. helper modes
-  app.rs         # the GPUI window: header + menu, cards, About dialog
+  main.rs        # entry point; dispatches GUI vs. helper modes, single instance
+  app.rs         # the GPUI window: header + menu, cards, popovers, About dialog
   assets.rs      # serves the embedded brand icon over GPUI Kit's defaults
+  autostart.rs   # the "start with Windows" Run entry
+  tray.rs        # the tray icon and its menu (background mode)
+  platform.rs    # the Win32 calls with no safe wrapper: mutex, show/hide window
   elevation.rs   # control-mode selection, per-action UAC fallback
   helper_task.rs # no-prompt control: the scheduled-task setup + client
   ctl.rs         # privileged helper entry points (--ctl / --ctl-from-task)
-  settings.rs    # theme preference, saved to %APPDATA%\Databaser\settings.json
+  settings.rs    # theme, background mode, update cache (%APPDATA%\Databaser)
   services/
     model.rs     # ServiceInfo / ServiceKind / ServiceState / ServiceAction
     error.rs     # ServiceError (thiserror) for discovery + control
-    scm.rs       # discovery + status queries (read-only, unelevated)
-    control.rs   # start / stop / restart (runs elevated)
+    scm.rs       # discovery, status queries, start type (read-only, unelevated)
+    version.rs   # installed versions, from the registry or the data directory
+    ports.rs     # listening ports, from the kernel socket table
+    control.rs   # start / stop / restart / start type (runs elevated)
 build.rs         # Windows exe metadata + icon
+scripts/         # release notes, tray icon generation
 ```
 
 ## Icon
@@ -108,8 +157,16 @@ build.rs         # Windows exe metadata + icon
 `assets/icon.svg` is the app's icon artwork; it is also rendered in the About
 dialog. `assets/icon.ico` is the same artwork in Windows icon format, embedded
 into the executable by `build.rs` — that is what Windows shows in the **title
-bar, taskbar and Alt-Tab**. Both files are committed and need no tooling to
-build.
+bar, taskbar and Alt-Tab**.
+
+`assets/tray-32.rgba` is the same artwork as raw 32×32 RGBA, which is what the
+tray backend takes. The app ships no image decoder, so it is baked once by
+`scripts/make-tray-icon.ps1` and committed. Re-run that script only if
+`assets/icon.ico` changes:
+
+```powershell
+powershell -File scripts/make-tray-icon.ps1
+```
 
 ## Releases and updates
 
@@ -179,6 +236,12 @@ Linting follows the strict settings in `[lints]` (`clippy::all` denied,
 cargo clippy --all-targets --all-features --locked -- -D warnings
 ```
 
+- `unsafe_code` is **denied**, not forbidden: three small modules call Win32
+  directly because no safe wrapper exists — `platform.rs` (single-instance
+  mutex, showing and hiding the window), and `services/control.rs` and
+  `services/ports.rs` (changing a start type; reading the socket table). Each
+  call site carries an `#[expect(unsafe_code, reason = "…")]` explaining why,
+  so an accidental `unsafe` anywhere else is still a build error.
 - Errors use typed `thiserror` enums (`ServiceError`, `ElevationError`)
   rather than strings; the UI shows their `Display` text.
 - Blocking Windows SCM and UAC work runs on gpui's *background* executor, so
@@ -187,7 +250,21 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 
 ## Roadmap
 
-- [ ] Listening ports (3306 / 5432 / 1433) and server versions on each card
-- [ ] Start-up mode toggle (Automatic / Manual) per service
-- [ ] Settings screen
-- [ ] Code signing for the executable and installer
+Everything originally planned has shipped: the listening ports and server
+versions, the per-service start-up type, and the details popover they live in.
+The menu already carries every setting, so no separate settings screen.
+
+Deliberately not planned:
+
+- **Pause / Resume**, editing dependencies, the log-on account, or
+  recovery-on-failure — the database engines rarely need these, and the app is a
+  tool for the database engines rather than a Task Manager replacement.
+- **Automatic (Delayed Start)** — preserved when another tool sets it, but not
+  offered here.
+- **Global hotkeys** — the tray icon is how the app is reached when the window
+  is hidden.
+
+Code signing for the executable and installer has been evaluated and deferred:
+it is a distribution concern rather than a product one, and a self-signed
+certificate behaves identically to no signature as far as SmartScreen is
+concerned.
