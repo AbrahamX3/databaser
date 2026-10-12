@@ -1356,7 +1356,11 @@ fn details_popover(
             let mut list = DescriptionList::horizontal()
                 .columns(1)
                 .bordered(false)
-                .label_width(px(84.))
+                // `large` widens the gap between rows; the label column has to
+                // fit the longest label ("Service name") or it runs into the
+                // value beside it.
+                .large()
+                .label_width(px(104.))
                 .child(DescriptionItem::new("Service").value(display_name.as_str()))
                 .child(DescriptionItem::new("Service name").value(name.as_str()))
                 .child(DescriptionItem::new("Type").value(kind.label()));
@@ -1507,3 +1511,4 @@ mod tests {
         assert!(should_offer_update(true, "0.2.0", Some("0.2.0")));
     }
 }
+
