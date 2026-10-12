@@ -1219,6 +1219,7 @@ fn details_popover(info: &ServiceInfo, cx: &mut Context<Databaser>) -> impl Into
     let kind = info.kind;
     let state = info.state;
     let start_type = info.start_type;
+    let version = info.version.clone();
 
     Popover::new(format!("details-{}", info.name))
         .anchor(Anchor::TopRight)
@@ -1260,15 +1261,21 @@ fn details_popover(info: &ServiceInfo, cx: &mut Context<Databaser>) -> impl Into
                         ))
                 });
 
-            div().max_w(px(420.)).child(
-                DescriptionList::new()
-                    .child(DescriptionItem::new("Service").value(display_name.as_str()))
-                    .child(DescriptionItem::new("Service name").value(name.as_str()))
-                    .child(DescriptionItem::new("Type").value(kind.label()))
-                    .child(DescriptionItem::new("State").value(state.label()))
-                    .child(DescriptionItem::new("Start-up").value(startup.into_any_element()))
-                    .child(DescriptionItem::new("Binary").value(executable_path.as_str())),
-            )
+            // The version row is omitted entirely when it could not be read,
+            // rather than showing an empty value.
+            let mut list = DescriptionList::new()
+                .child(DescriptionItem::new("Service").value(display_name.as_str()))
+                .child(DescriptionItem::new("Service name").value(name.as_str()))
+                .child(DescriptionItem::new("Type").value(kind.label()));
+            if let Some(version) = version.as_deref() {
+                list = list.child(DescriptionItem::new("Version").value(version));
+            }
+            list = list
+                .child(DescriptionItem::new("State").value(state.label()))
+                .child(DescriptionItem::new("Start-up").value(startup.into_any_element()))
+                .child(DescriptionItem::new("Binary").value(executable_path.as_str()));
+
+            div().max_w(px(420.)).child(list)
         })
 }
 

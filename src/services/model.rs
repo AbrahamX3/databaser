@@ -118,6 +118,8 @@ pub struct ServiceInfo {
     pub state: ServiceState,
     /// How Windows starts this service at boot.
     pub start_type: StartType,
+    /// The installed product version, when it can be determined.
+    pub version: Option<String>,
 }
 
 /// An operation the user can request against a service.

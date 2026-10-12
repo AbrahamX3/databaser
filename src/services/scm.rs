@@ -6,6 +6,7 @@
 
 use super::error::ServiceError;
 use super::model::{ServiceInfo, ServiceKind, ServiceState, StartType};
+use super::version;
 use windows_service::service::{
     ServiceAccess, ServiceStartType as WinStartType, ServiceState as WinState,
 };
@@ -55,6 +56,7 @@ pub fn discover() -> Result<Vec<ServiceInfo>, ServiceError> {
             } else {
                 display_name
             },
+            version: version::read(kind, &name, &executable_path),
             name,
             executable_path,
             kind,

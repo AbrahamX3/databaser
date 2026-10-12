@@ -4,6 +4,7 @@ mod control;
 mod error;
 mod model;
 mod scm;
+mod version;
 
 pub use control::run_action;
 pub use model::{ServiceAction, ServiceInfo, ServiceKind, ServiceState, StartType};
