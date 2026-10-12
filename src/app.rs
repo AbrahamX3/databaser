@@ -22,6 +22,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use crate::assets::APP_ICON;
+use crate::autostart;
 use crate::elevation::{self, ActionOutcome, ControlMode};
 use crate::helper_task::{self, TaskError};
 use crate::services::{self, ServiceAction, ServiceInfo, ServiceKind, ServiceState, StartType};
@@ -72,6 +73,9 @@ pub struct Databaser {
     settings: Settings,
     toasts: Vec<(ToastKind, String)>,
     update: UpdateState,
+    /// Whether the per-user Run entry points at this executable. Read from the
+    /// registry at start-up and after each toggle, never persisted here.
+    autostart: bool,
 }
 
 impl Databaser {
@@ -88,6 +92,7 @@ impl Databaser {
             settings,
             toasts: Vec::new(),
             update: UpdateState::Idle,
+            autostart: autostart::is_enabled(),
         };
 
         // Discovery, the elevation-mode probe, and state polling all touch
@@ -350,6 +355,32 @@ impl Databaser {
 
     fn push_toast(&mut self, kind: ToastKind, message: String) {
         self.toasts.push((kind, message));
+    }
+
+    /// Switch the per-user `Run` entry on or off.
+    ///
+    /// No elevation: the key lives under `HKCU`.
+    fn toggle_autostart(&mut self, cx: &mut Context<Self>) {
+        let wanted = !self.autostart;
+        match autostart::set(wanted) {
+            Ok(()) => {
+                self.autostart = wanted;
+                self.push_toast(
+                    ToastKind::Success,
+                    if wanted {
+                        "Databaser will start with Windows."
+                    } else {
+                        "Databaser will no longer start with Windows."
+                    }
+                    .to_string(),
+                );
+            }
+            Err(error) => self.push_toast(
+                ToastKind::Error,
+                format!("Could not change the Windows start-up entry: {error}"),
+            ),
+        }
+        cx.notify();
     }
 
     // ---- updates ---------------------------------------------------------
@@ -632,6 +663,7 @@ impl Databaser {
         let theme = self.theme;
         let mode = self.mode;
         let setting_up = self.setting_up;
+        let autostart = self.autostart;
 
         Button::new("settings-menu")
             .icon(icon(IconName::Ellipsis))
@@ -647,6 +679,20 @@ impl Databaser {
                                 let entity = entity.clone();
                                 move |_, _, cx| {
                                     entity.update(cx, Databaser::rescan);
+                                }
+                            }),
+                    )
+                    .separator();
+
+                let menu = menu
+                    .item(
+                        PopupMenuItem::new("Start Databaser with Windows")
+                            .icon(icon(IconName::Rocket))
+                            .checked(autostart)
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    entity.update(cx, Databaser::toggle_autostart);
                                 }
                             }),
                     )

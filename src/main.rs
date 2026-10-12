@@ -11,15 +11,20 @@
 
 mod app;
 mod assets;
+mod autostart;
 mod ctl;
 mod elevation;
 mod helper_task;
+mod platform;
 mod services;
 mod settings;
 mod update;
 
 use gpui_kit::*;
 use std::io::Write as _;
+
+/// Window title, also used to find the window when a second instance starts.
+const WINDOW_TITLE: &str = "Databaser";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -28,6 +33,14 @@ fn main() {
         Some("--ctl-from-task") => std::process::exit(ctl::run_from_task()),
         _ => {}
     }
+
+    // Starting with Windows makes a second launch likely (autostart plus a
+    // manual open), so surface the window that already exists instead of
+    // adding a duplicate that also polls. Held for the rest of `main`.
+    let Some(_instance) = platform::SingleInstance::acquire("Databaser.single-instance") else {
+        platform::focus_window(WINDOW_TITLE);
+        return;
+    };
 
     gpui_kit::application()
         .with_assets(assets::AppAssets)
@@ -56,7 +69,7 @@ fn window_options() -> WindowOptions {
         // Keep the layout usable: below this the cards reflow rather than clip.
         window_min_size: Some(size(px(520.), px(360.))),
         titlebar: Some(TitlebarOptions {
-            title: Some("Databaser".into()),
+            title: Some(WINDOW_TITLE.into()),
             ..Default::default()
         }),
         ..Default::default()

@@ -34,6 +34,7 @@ icon_assets!(
         Moon,
         Download,
         Github,
+        Rocket,
         X,
     ]
 );
