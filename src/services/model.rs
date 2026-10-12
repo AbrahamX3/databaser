@@ -5,6 +5,7 @@
 pub enum ServiceKind {
     MySql,
     PostgreSql,
+    SqlServer,
 }
 
 impl ServiceKind {
@@ -12,6 +13,7 @@ impl ServiceKind {
         match self {
             Self::MySql => "MySQL",
             Self::PostgreSql => "PostgreSQL",
+            Self::SqlServer => "SQL Server",
         }
     }
 }

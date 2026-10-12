@@ -801,6 +801,7 @@ fn kind_color(kind: ServiceKind) -> Rgba {
     match kind {
         ServiceKind::MySql => rgb(0x2f6f9f),
         ServiceKind::PostgreSql => rgb(0x41618a),
+        ServiceKind::SqlServer => rgb(0x8f4147),
     }
 }
 

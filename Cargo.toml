@@ -2,7 +2,7 @@
 name = "databaser"
 version = "0.1.0"
 edition = "2021"
-description = "Start, stop and restart local MySQL and PostgreSQL services"
+description = "Start, stop and restart local MySQL, PostgreSQL and SQL Server services"
 license = "MIT"
 authors = ["AbrahamX3"]
 build = "build.rs"

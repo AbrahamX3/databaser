@@ -10,8 +10,10 @@ Built in Rust with [GPUI Kit](https://gpui-kit.com) (`gpui-kit` 0.7.1).
 ## What it does
 
 - Scans the Windows Service Control Manager on launch and lists every local
-  MySQL/MariaDB and PostgreSQL service (matched by service name *and* the
-  executable behind it, e.g. `mysqld.exe` / `pg_ctl.exe`).
+  MySQL/MariaDB, PostgreSQL and Microsoft SQL Server service (matched by service
+  name *and* the executable behind it, e.g. `mysqld.exe` / `pg_ctl.exe` /
+  `sqlservr.exe`). For SQL Server only the database engine is listed; the Agent,
+  Browser, CEIP and VSS Writer helpers are not.
 - Shows each service with a live status indicator, refreshed every 2 seconds,
   so it stays correct even if something else changes the service.
 - Per service:

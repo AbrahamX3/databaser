@@ -119,6 +119,17 @@ fn classify(name: &str, executable: &str, display_name: &str) -> Option<ServiceK
         return Some(ServiceKind::PostgreSql);
     }
 
+    // SQL Server engine only. It runs `sqlservr.exe` and its display name is
+    // "SQL Server (INSTANCE)", which cleanly excludes the Agent, Browser, CEIP
+    // and VSS Writer helpers.
+    if executable.contains("sqlservr.exe")
+        || name == "mssqlserver"
+        || name.starts_with("mssql$")
+        || display.starts_with("sql server (")
+    {
+        return Some(ServiceKind::SqlServer);
+    }
+
     None
 }
 
@@ -170,5 +181,63 @@ mod tests {
     fn classify_ignores_unrelated_service() {
         let kind = classify("Spooler", r"c:\windows\system32\spoolsv.exe", "Print Spooler");
         assert_eq!(kind, None);
+    }
+
+    #[test]
+    fn classify_matches_sql_server_engine_from_executable() {
+        let kind = classify(
+            "MSSQL$SQLEXPRESS",
+            r"c:\program files\microsoft sql server\mssql15.sqlexpress\mssql\binn\sqlservr.exe",
+            "SQL Server (SQLEXPRESS)",
+        );
+        assert_eq!(kind, Some(ServiceKind::SqlServer));
+    }
+
+    #[test]
+    fn classify_matches_sql_server_engine_by_display_name() {
+        let kind = classify("svc_unknown", "", "SQL Server (SQLEXPRESS)");
+        assert_eq!(kind, Some(ServiceKind::SqlServer));
+    }
+
+    #[test]
+    fn classify_matches_default_sql_server_instance_by_name() {
+        let kind = classify("MSSQLSERVER", "", "");
+        assert_eq!(kind, Some(ServiceKind::SqlServer));
+    }
+
+    #[test]
+    fn classify_ignores_sql_server_agent() {
+        let kind = classify(
+            "SQLAgent$SQLEXPRESS",
+            r"c:\program files\microsoft sql server\mssql15.sqlexpress\mssql\binn\sqlagent.exe",
+            "SQL Server Agent (SQLEXPRESS)",
+        );
+        assert_eq!(kind, None);
+    }
+
+    #[test]
+    fn classify_ignores_sql_server_browser() {
+        let kind = classify(
+            "SQLBrowser",
+            r"c:\program files (x86)\microsoft sql server\90\shared\sqlbrowser.exe",
+            "SQL Server Browser",
+        );
+        assert_eq!(kind, None);
+    }
+
+    #[test]
+    fn classify_ignores_sql_server_telemetry_and_writer() {
+        let telemetry = classify(
+            "SQLTELEMETRY$SQLEXPRESS",
+            r"c:\program files\microsoft sql server\mssql15.sqlexpress\mssql\binn\sqlceip.exe",
+            "SQL Server CEIP service (SQLEXPRESS)",
+        );
+        let writer = classify(
+            "SQLWriter",
+            r"c:\program files (x86)\microsoft sql server\90\shared\sqlwriter.exe",
+            "SQL Server VSS Writer",
+        );
+        assert_eq!(telemetry, None);
+        assert_eq!(writer, None);
     }
 }
