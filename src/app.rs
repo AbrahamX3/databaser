@@ -1335,9 +1335,18 @@ fn details_popover(
                         ))
                 });
 
+            // The default is a bordered 3-column grid. One column, unbordered,
+            // gives a plain stack of `label  value` rows with the labels
+            // aligned - which is what a details popover wants, and what a long
+            // binary path needs in order to wrap instead of stretching the
+            // popover off-screen.
+            //
             // The version row is omitted entirely when it could not be read,
             // rather than showing an empty value.
-            let mut list = DescriptionList::new()
+            let mut list = DescriptionList::horizontal()
+                .columns(1)
+                .bordered(false)
+                .label_width(px(84.))
                 .child(DescriptionItem::new("Service").value(display_name.as_str()))
                 .child(DescriptionItem::new("Service name").value(name.as_str()))
                 .child(DescriptionItem::new("Type").value(kind.label()));
@@ -1346,11 +1355,18 @@ fn details_popover(
             }
             list = list
                 .child(DescriptionItem::new("State").value(state.label()))
-                .child(DescriptionItem::new("Start-up").value(startup.into_any_element()))
+                .child(
+                    // A row wrapper stops the button stretching to fill the
+                    // value column.
+                    DescriptionItem::new("Start-up")
+                        .value(div().flex().flex_row().child(startup).into_any_element()),
+                )
                 .child(DescriptionItem::new("Ports").value(ports_text.as_str()))
                 .child(DescriptionItem::new("Binary").value(executable_path.as_str()));
 
-            div().max_w(px(420.)).child(list)
+            // A definite width keeps the popover a predictable size and makes
+            // the values wrap instead of stretching it off-screen.
+            div().w(px(400.)).child(list)
         })
 }
 
