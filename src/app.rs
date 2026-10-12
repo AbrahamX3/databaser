@@ -431,9 +431,9 @@ impl Databaser {
         self.push_toast(
             ToastKind::Success,
             if wanted {
-                "Databaser keeps running in the tray when you close it."
+                "Run in background is on \u{2014} closing the window keeps Databaser in the tray."
             } else {
-                "Closing the window exits Databaser again."
+                "Run in background is off \u{2014} closing the window exits."
             }
             .to_string(),
         );
@@ -451,9 +451,9 @@ impl Databaser {
                 self.push_toast(
                     ToastKind::Success,
                     if wanted {
-                        "Databaser will start with Windows."
+                        "Start with Windows is on \u{2014} Databaser opens when you sign in."
                     } else {
-                        "Databaser will no longer start with Windows."
+                        "Start with Windows is off."
                     }
                     .to_string(),
                 );
@@ -768,9 +768,12 @@ impl Databaser {
                     )
                     .separator();
 
+                // Ticks go on the right: when an item has an icon, the left
+                // slot is taken by the icon and the check would never be drawn.
                 let menu = menu
+                    .check_side(Side::Right)
                     .item(
-                        PopupMenuItem::new("Start Databaser with Windows")
+                        PopupMenuItem::new("Start with Windows")
                             .icon(icon(IconName::Rocket))
                             .checked(autostart)
                             .on_click({
@@ -781,13 +784,33 @@ impl Databaser {
                             }),
                     )
                     .item(
-                        PopupMenuItem::new("Run in background (minimize to tray)")
+                        PopupMenuItem::new("Run in background")
                             .icon(icon(IconName::Monitor))
                             .checked(background)
                             .on_click({
                                 let entity = entity.clone();
                                 move |_, _, cx| {
                                     entity.update(cx, Databaser::toggle_background);
+                                }
+                            }),
+                    )
+                    // One feature with two directions, so one toggle rather than
+                    // a submenu offering both at once.
+                    .item(
+                        PopupMenuItem::new("No-prompt control")
+                            .icon(icon(IconName::ShieldCheck))
+                            .checked(mode == ControlMode::Task)
+                            .disabled(setting_up || mode == ControlMode::Elevated)
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    entity.update(cx, |this, cx| {
+                                        if mode == ControlMode::Task {
+                                            this.remove_elevated(cx);
+                                        } else {
+                                            this.setup_elevated(cx);
+                                        }
+                                    });
                                 }
                             }),
                     )
@@ -831,33 +854,6 @@ impl Databaser {
                     )
                     .separator();
 
-                let menu = menu
-                    .submenu_with_icon(Some(icon(IconName::Settings)), "Advanced", window, cx, {
-                        let entity = entity.clone();
-                        move |menu, _, _| {
-                            let enable = PopupMenuItem::new("Enable no-prompt control")
-                                .icon(icon(IconName::ShieldCheck))
-                                .disabled(mode != ControlMode::Uac || setting_up)
-                                .on_click({
-                                    let entity = entity.clone();
-                                    move |_, _, cx| {
-                                        entity.update(cx, Databaser::setup_elevated);
-                                    }
-                                });
-                            let remove = PopupMenuItem::new("Remove elevated control")
-                                .icon(icon(IconName::ShieldOff))
-                                .disabled(mode != ControlMode::Task)
-                                .on_click({
-                                    let entity = entity.clone();
-                                    move |_, _, cx| {
-                                        entity.update(cx, Databaser::remove_elevated);
-                                    }
-                                });
-                            menu.item(enable).item(remove)
-                        }
-                    })
-                    .separator();
-
                 menu.item(
                     PopupMenuItem::new("Check for updates")
                         .icon(icon(IconName::Download))
@@ -869,7 +865,7 @@ impl Databaser {
                         }),
                 )
                 .item(
-                    PopupMenuItem::new("About Databaser")
+                    PopupMenuItem::new("About")
                         .icon(icon(IconName::Info))
                         .on_click(|_, window, cx| open_about(window, cx)),
                 )
