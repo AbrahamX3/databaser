@@ -27,7 +27,8 @@ pub fn discover() -> Result<Vec<ServiceInfo>, ServiceError> {
             continue;
         };
 
-        let executable = config.executable_path.to_string_lossy().to_lowercase();
+        let executable_path = config.executable_path.to_string_lossy().to_string();
+        let executable = executable_path.to_lowercase();
         let display_name = config.display_name.to_string_lossy().to_string();
         let Some(kind) = classify(&name, &executable, &display_name) else {
             continue;
@@ -44,6 +45,7 @@ pub fn discover() -> Result<Vec<ServiceInfo>, ServiceError> {
                 display_name
             },
             name,
+            executable_path,
             kind,
             state,
         });

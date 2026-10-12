@@ -63,6 +63,8 @@ pub struct ServiceInfo {
     pub name: String,
     /// Human friendly display name shown in the UI.
     pub display_name: String,
+    /// Path to the service binary, as recorded in the SCM configuration.
+    pub executable_path: String,
     pub kind: ServiceKind,
     pub state: ServiceState,
 }

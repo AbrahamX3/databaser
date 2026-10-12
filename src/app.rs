@@ -10,9 +10,11 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::Disableable as _;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::description_list::{DescriptionItem, DescriptionList};
 use gpui_kit::component::link::Link;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _, Side, Theme, ThemeMode, WindowExt as _,
@@ -806,7 +808,8 @@ impl Databaser {
                         busy_action,
                         can_act,
                         cx,
-                    )),
+                    ))
+                    .child(details_popover(info)),
             );
 
         let core = div()
@@ -1075,6 +1078,37 @@ fn kind_color(kind: ServiceKind) -> Rgba {
 }
 
 /// Shorthand for an icon from the shared catalog.
+/// A ghost "Details" button that opens a read-only popover describing the service.
+///
+/// The popover is content-sized: it clamps to the window rather than flipping, so
+/// the trigger's anchor keeps it inside the card's column.
+fn details_popover(info: &ServiceInfo) -> impl IntoElement {
+    let name = info.name.clone();
+    let display_name = info.display_name.clone();
+    let executable_path = info.executable_path.clone();
+    let kind = info.kind;
+    let state = info.state;
+
+    Popover::new(format!("details-{}", info.name))
+        .anchor(Anchor::TopRight)
+        .trigger(
+            Button::new(format!("details-trigger-{}", info.name))
+                .icon(icon(IconName::Info))
+                .tooltip("Details")
+                .ghost(),
+        )
+        .content(move |_state, _window, _cx| {
+            div().max_w(px(420.)).child(
+                DescriptionList::new()
+                    .child(DescriptionItem::new("Service").value(display_name.as_str()))
+                    .child(DescriptionItem::new("Service name").value(name.as_str()))
+                    .child(DescriptionItem::new("Type").value(kind.label()))
+                    .child(DescriptionItem::new("State").value(state.label()))
+                    .child(DescriptionItem::new("Binary").value(executable_path.as_str())),
+            )
+        })
+}
+
 fn icon(name: IconName) -> Icon {
     Icon::new(name)
 }
