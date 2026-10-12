@@ -27,6 +27,18 @@ Built in Rust with [GPUI Kit](https://gpui-kit.com) (`gpui-kit` 0.7.1).
   - **Advanced** → *Enable no-prompt control* / *Remove elevated control*
   - **About Databaser** → a dialog with the icon, name, version and source link
 
+## Install
+
+Download from the [latest release](https://github.com/AbrahamX3/databaser/releases/latest):
+
+- **`Databaser-Setup-<version>.exe`** — recommended. A per-user installer (no
+  UAC) that adds a Start Menu shortcut and an uninstall entry. It installs to
+  `%LOCALAPPDATA%\Programs\Databaser`, which the in-app updater can write to.
+- **`databaser-x86_64-pc-windows-msvc.zip`** — portable. Unzip and run
+  `databaser.exe` anywhere.
+
+Either way, updating is handled in the app: **Menu → Check for updates**.
+
 ## Running it
 
 ```powershell
@@ -143,7 +155,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 
 ## Roadmap
 
-- [ ] Listening ports (3306 / 5432) and server versions on each card
+- [ ] Listening ports (3306 / 5432 / 1433) and server versions on each card
 - [ ] Start-up mode toggle (Automatic / Manual) per service
 - [ ] Settings screen
-- [ ] Installer
+- [ ] Code signing for the executable and installer
