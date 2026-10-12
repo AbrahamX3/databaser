@@ -90,6 +90,16 @@ pub fn query_states(names: &[String]) -> Result<Vec<Option<ServiceState>>, Servi
         .collect())
 }
 
+/// PID of the running service, or `None` when it is not running.
+pub fn process_id(name: &str) -> Option<u32> {
+    let service = open_manager()
+        .ok()?
+        .open_service(name, ServiceAccess::QUERY_STATUS)
+        .ok()?;
+    let pid = service.query_status().ok()?.process_id?;
+    (pid != 0).then_some(pid)
+}
+
 fn open_manager() -> Result<ServiceManager, ServiceError> {
     ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
         .map_err(ServiceError::service_manager)

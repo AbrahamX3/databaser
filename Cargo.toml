@@ -38,7 +38,9 @@ winreg = "0.56"
 # Kept on the same 0.61 line as `windows-service` so `SC_HANDLE` is one type.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
     "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Services",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",

@@ -4,6 +4,7 @@
 //! soft outer shell (a faint tint plus a hairline) wrapping a raised inner
 //! surface, with generous spacing and a single, quiet menu for all settings.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use gpui_kit::assets::IconName;
@@ -59,8 +60,20 @@ enum UpdateState {
     ReadyToRestart(String),
 }
 
+/// Listening ports for a service, fetched the first time its popover is opened
+/// rather than on every poll.
+#[derive(Debug, Clone)]
+enum Ports {
+    Loading,
+    Ready(Vec<u16>),
+    /// The service is not running, or the socket table could not be read.
+    Unavailable,
+}
+
 pub struct Databaser {
     services: Vec<ServiceInfo>,
+    /// Listening ports per service name, filled lazily from the popover.
+    ports: HashMap<String, Ports>,
     /// Name of the service currently being acted on, if any.
     busy: Option<String>,
     busy_action: Option<ServiceAction>,
@@ -84,6 +97,7 @@ impl Databaser {
     pub fn new(settings: Settings, cx: &mut Context<Self>) -> Self {
         let this = Self {
             services: Vec::new(),
+            ports: HashMap::new(),
             busy: None,
             busy_action: None,
             scanning: true,
@@ -357,6 +371,42 @@ impl Databaser {
 
     fn push_toast(&mut self, kind: ToastKind, message: String) {
         self.toasts.push((kind, message));
+    }
+
+    /// Look up which ports a service is listening on, once, on first use.
+    ///
+    /// Both the SCM query and the socket table are blocking, so this runs on the
+    /// background executor like everything else that touches Windows.
+    fn fetch_ports(&mut self, name: String, cx: &mut Context<Self>) {
+        if self.ports.contains_key(&name) {
+            return;
+        }
+        self.ports.insert(name.clone(), Ports::Loading);
+
+        cx.spawn(async move |entity, cx| {
+            let query_name = name.clone();
+            let found = cx
+                .background_executor()
+                .spawn(async move {
+                    services::process_id(&query_name)
+                        .map(services::listening_ports)
+                        .transpose()
+                })
+                .await;
+
+            entity
+                .update(cx, |this, cx| {
+                    let state = match found {
+                        Ok(Some(ports)) => Ports::Ready(ports),
+                        // Not running, or the socket table could not be read.
+                        Ok(None) | Err(_) => Ports::Unavailable,
+                    };
+                    this.ports.insert(name, state);
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
     }
 
     /// Turn the tray icon, and with it "closing hides the window", on or off.
@@ -937,7 +987,7 @@ impl Databaser {
                         can_act,
                         cx,
                     ))
-                    .child(details_popover(info, cx)),
+                    .child(details_popover(info, self.ports.get(&info.name), cx)),
             );
 
         let core = div()
@@ -1211,7 +1261,11 @@ fn kind_color(kind: ServiceKind) -> Rgba {
 ///
 /// The popover is content-sized: it clamps to the window rather than flipping, so
 /// the trigger's anchor keeps it inside the card's column.
-fn details_popover(info: &ServiceInfo, cx: &mut Context<Databaser>) -> impl IntoElement {
+fn details_popover(
+    info: &ServiceInfo,
+    ports: Option<&Ports>,
+    cx: &mut Context<Databaser>,
+) -> impl IntoElement {
     let entity = cx.entity();
     let name = info.name.clone();
     let display_name = info.display_name.clone();
@@ -1221,6 +1275,17 @@ fn details_popover(info: &ServiceInfo, cx: &mut Context<Databaser>) -> impl Into
     let start_type = info.start_type;
     let version = info.version.clone();
 
+    let ports_text = match ports {
+        Some(Ports::Ready(ports)) if !ports.is_empty() => ports
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+        Some(Ports::Ready(_)) => "none".to_string(),
+        Some(Ports::Unavailable) => "not running".to_string(),
+        None | Some(Ports::Loading) => "\u{2026}".to_string(),
+    };
+
     Popover::new(format!("details-{}", info.name))
         .anchor(Anchor::TopRight)
         .trigger(
@@ -1229,6 +1294,15 @@ fn details_popover(info: &ServiceInfo, cx: &mut Context<Databaser>) -> impl Into
                 .tooltip("Details")
                 .ghost(),
         )
+        .on_open_change({
+            let entity = entity.clone();
+            let service = name.clone();
+            move |open, _window, cx| {
+                if *open {
+                    entity.update(cx, |this, cx| this.fetch_ports(service.clone(), cx));
+                }
+            }
+        })
         .content(move |_state, _window, _cx| {
             let menu_entity = entity.clone();
             let menu_service = name.clone();
@@ -1273,6 +1347,7 @@ fn details_popover(info: &ServiceInfo, cx: &mut Context<Databaser>) -> impl Into
             list = list
                 .child(DescriptionItem::new("State").value(state.label()))
                 .child(DescriptionItem::new("Start-up").value(startup.into_any_element()))
+                .child(DescriptionItem::new("Ports").value(ports_text.as_str()))
                 .child(DescriptionItem::new("Binary").value(executable_path.as_str()));
 
             div().max_w(px(420.)).child(list)
