@@ -35,6 +35,10 @@ pub struct Settings {
     /// A version the user dismissed, so the banner does not reappear for it.
     #[serde(default)]
     pub skipped_version: Option<String>,
+    /// Keep the tray icon and hide the window instead of exiting when it is
+    /// closed. Off by default: closing a window should normally close it.
+    #[serde(default)]
+    pub background: bool,
 }
 
 impl Settings {

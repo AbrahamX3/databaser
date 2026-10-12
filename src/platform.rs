@@ -2,17 +2,22 @@
 //!
 //! Everything else goes through a safe wrapper (`windows-service`, `winreg`,
 //! `runas`). What lives here has no equivalent in those: holding a
-//! single-instance mutex, and bringing another process's window to the front.
+//! single-instance mutex, and showing, hiding or focusing our own window.
 //!
 //! GPUI's own `App::activate()` and `App::hide()` are empty stubs on Windows
-//! (`// todo(windows)` in `gpui-pre-windows`), so window activation cannot come
-//! from the framework either.
+//! (`// todo(windows)` in `gpui-pre-windows`), and it exposes no
+//! `Window::hide`/`show` at all, so window visibility cannot come from the
+//! framework either. The window is addressed by its title, which is unique to
+//! this app and is also how a second instance finds the first.
 
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, SetForegroundWindow, ShowWindowAsync, SW_RESTORE,
+    FindWindowW, SetForegroundWindow, ShowWindowAsync, SW_HIDE, SW_RESTORE,
 };
+
+/// Window title. Also how the tray and a second instance find the window.
+pub const WINDOW_TITLE: &str = "Databaser";
 
 /// Guard that keeps a second copy of the app from starting.
 ///
@@ -62,11 +67,21 @@ impl Drop for SingleInstance {
 }
 
 /// Bring a window with this title to the front. False when there is none.
+pub fn focus_window(title: &str) -> bool {
+    show_window(title, true)
+}
+
+/// Show or hide a window with this title. False when there is none.
+///
+/// Showing also focuses, which is what the tray's "Open Databaser" wants.
+/// Hiding takes the window out of the taskbar and Alt-Tab entirely, which is
+/// what "minimize to tray" means; GPUI reacts to the resulting `WM_SHOWWINDOW`
+/// by reporting the visibility change and redrawing.
 #[expect(
     unsafe_code,
-    reason = "FindWindowW/SetForegroundWindow have no safe wrapper; GPUI's activate() is a stub"
+    reason = "FindWindowW/ShowWindowAsync/SetForegroundWindow have no safe wrapper"
 )]
-pub fn focus_window(title: &str) -> bool {
+pub fn show_window(title: &str, visible: bool) -> bool {
     let title = wide(title);
 
     // Safety: `title` is NUL-terminated and outlives the calls.
@@ -75,10 +90,15 @@ pub fn focus_window(title: &str) -> bool {
         return false;
     }
 
-    // Restore first, so a minimised window is visible before being focused.
+    // Safety: `hwnd` came from FindWindowW and stays valid for these calls.
     unsafe {
-        ShowWindowAsync(hwnd, SW_RESTORE);
-        SetForegroundWindow(hwnd);
+        if visible {
+            // Restore first, so a minimised window is visible before focusing.
+            ShowWindowAsync(hwnd, SW_RESTORE);
+            SetForegroundWindow(hwnd);
+        } else {
+            ShowWindowAsync(hwnd, SW_HIDE);
+        }
     }
     true
 }

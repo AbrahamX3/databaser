@@ -23,6 +23,8 @@ use gpui_kit::*;
 
 use crate::assets::APP_ICON;
 use crate::autostart;
+use crate::platform;
+use crate::tray;
 use crate::elevation::{self, ActionOutcome, ControlMode};
 use crate::helper_task::{self, TaskError};
 use crate::services::{self, ServiceAction, ServiceInfo, ServiceKind, ServiceState, StartType};
@@ -357,6 +359,37 @@ impl Databaser {
         self.toasts.push((kind, message));
     }
 
+    /// Turn the tray icon, and with it "closing hides the window", on or off.
+    fn toggle_background(&mut self, cx: &mut Context<Self>) {
+        let wanted = !self.settings.background;
+
+        if wanted {
+            if let Err(error) = tray::install(cx) {
+                self.push_toast(
+                    ToastKind::Error,
+                    format!("Could not create the tray icon: {error}"),
+                );
+                cx.notify();
+                return;
+            }
+        } else {
+            tray::remove(cx);
+        }
+
+        self.settings.background = wanted;
+        self.settings.save();
+        self.push_toast(
+            ToastKind::Success,
+            if wanted {
+                "Databaser keeps running in the tray when you close it."
+            } else {
+                "Closing the window exits Databaser again."
+            }
+            .to_string(),
+        );
+        cx.notify();
+    }
+
     /// Switch the per-user `Run` entry on or off.
     ///
     /// No elevation: the key lives under `HKCU`.
@@ -664,6 +697,7 @@ impl Databaser {
         let mode = self.mode;
         let setting_up = self.setting_up;
         let autostart = self.autostart;
+        let background = self.settings.background;
 
         Button::new("settings-menu")
             .icon(icon(IconName::Ellipsis))
@@ -693,6 +727,17 @@ impl Databaser {
                                 let entity = entity.clone();
                                 move |_, _, cx| {
                                     entity.update(cx, Databaser::toggle_autostart);
+                                }
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Run in background (minimize to tray)")
+                            .icon(icon(IconName::Monitor))
+                            .checked(background)
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    entity.update(cx, Databaser::toggle_background);
                                 }
                             }),
                     )
@@ -1299,6 +1344,16 @@ fn flush_toasts(
 /// dismissed earlier; the automatic launch check stays quiet about it.
 fn should_offer_update(manual: bool, available: &str, skipped: Option<&str>) -> bool {
     manual || skipped != Some(available)
+}
+
+/// Closing the window hides it to the tray while "Run in background" is on, and
+/// exits the app otherwise.
+pub fn window_should_close(_window: &mut Window, cx: &mut App) -> bool {
+    if tray::is_enabled(cx) {
+        platform::show_window(platform::WINDOW_TITLE, false);
+        return false;
+    }
+    true
 }
 
 /// Apply a three-way theme preference to the global theme.
