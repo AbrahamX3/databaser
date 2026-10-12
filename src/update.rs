@@ -10,8 +10,10 @@
 
 use self_update::backends::github::Update;
 
-const REPO_OWNER: &str = "AbrahamX3";
-const REPO_NAME: &str = "databaser";
+// Crate-visible so the About dialog can assert it links to the same repository
+// the updater targets (see `about_dialog_repository_url_matches_the_updater`).
+pub(crate) const REPO_OWNER: &str = "AbrahamX3";
+pub(crate) const REPO_NAME: &str = "databaser";
 const BIN_NAME: &str = "databaser";
 
 #[derive(Debug, thiserror::Error)]

@@ -10,6 +10,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::Disableable as _;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::link::Link;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::spinner::Spinner;
@@ -31,7 +32,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(2000);
 /// Delay before the automatic launch update check, so start-up stays snappy.
 const AUTO_CHECK_DELAY: Duration = Duration::from_secs(6);
 
-const GITHUB_URL: &str = "github.com/abraham/databaser";
+/// Repository URL, taken from `Cargo.toml` so it cannot drift from the updater's
+/// own `REPO_OWNER` / `REPO_NAME` (a test below keeps the two in step).
+const REPOSITORY_URL: &str = env!("CARGO_PKG_REPOSITORY");
 
 #[derive(Clone, Copy)]
 enum ToastKind {
@@ -927,9 +930,11 @@ fn about_content(cx: &App) -> impl IntoElement {
                 ),
         )
         .child(
-            div().w_full().text_sm().text_color(muted).child(
-                "Start, stop and restart your local MySQL and PostgreSQL services, without opening Task Manager.",
-            ),
+            div()
+                .w_full()
+                .text_sm()
+                .text_color(muted)
+                .child(env!("CARGO_PKG_DESCRIPTION")),
         )
         .child(div().h(px(1.)).w_full().bg(cx.theme().border))
         .child(
@@ -938,21 +943,36 @@ fn about_content(cx: &App) -> impl IntoElement {
                 .flex_col()
                 .w_full()
                 .gap_1()
+                .child(div().text_xs().text_color(muted).child("SOURCE"))
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child("SOURCE"),
-                )
-                .child(div().text_sm().text_color(cx.theme().link).child(GITHUB_URL)),
+                    Link::new("about-repository")
+                        .href(REPOSITORY_URL)
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .text_sm()
+                        .child(icon(IconName::Github).small())
+                        .child(repository_label()),
+                ),
         )
         .child(
             div()
                 .w_full()
                 .text_xs()
                 .text_color(muted)
-                .child("Built with Rust and GPUI Kit \u{00b7} MIT licensed"),
+                .child(format!(
+                    "Built with Rust and GPUI Kit \u{00b7} {} licensed",
+                    env!("CARGO_PKG_LICENSE")
+                )),
         )
+}
+
+/// The repository URL without its scheme, as shown in the About dialog.
+fn repository_label() -> &'static str {
+    REPOSITORY_URL
+        .strip_prefix("https://")
+        .unwrap_or(REPOSITORY_URL)
 }
 
 /// The brand icon inside a nested tray, matching the card treatment.
@@ -1117,7 +1137,17 @@ pub fn apply_theme(pref: ThemePreference, window: Option<&mut Window>, cx: &mut 
 
 #[cfg(test)]
 mod tests {
-    use super::should_offer_update;
+    use super::{should_offer_update, REPOSITORY_URL};
+    use crate::update::{REPO_NAME, REPO_OWNER};
+
+    #[test]
+    fn about_dialog_repository_url_matches_the_updater() {
+        assert_eq!(
+            REPOSITORY_URL,
+            format!("https://github.com/{REPO_OWNER}/{REPO_NAME}"),
+            "Cargo.toml's repository and the updater's release target must agree"
+        );
+    }
 
     #[test]
     fn manual_check_offers_any_available_version() {

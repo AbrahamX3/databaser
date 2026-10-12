@@ -33,6 +33,7 @@ icon_assets!(
         Sun,
         Moon,
         Download,
+        Github,
         X,
     ]
 );

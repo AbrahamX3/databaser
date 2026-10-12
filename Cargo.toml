@@ -5,6 +5,7 @@ edition = "2021"
 description = "Start, stop and restart local MySQL, PostgreSQL and SQL Server services"
 license = "MIT"
 authors = ["AbrahamX3"]
+repository = "https://github.com/AbrahamX3/databaser"
 build = "build.rs"
 
 [dependencies]
