@@ -78,8 +78,9 @@ pub struct Databaser {
     busy: Option<String>,
     busy_action: Option<ServiceAction>,
     scanning: bool,
-    /// True while the no-prompt scheduled task is being installed.
-    setting_up: bool,
+    /// True while the no-prompt scheduled task is being installed or removed,
+    /// so the toggle cannot be clicked twice while UAC is up.
+    elevation_busy: bool,
     /// How privileged actions are performed (probed on start-up).
     mode: ControlMode,
     /// A persistent problem (e.g. discovery failed), shown as a banner.
@@ -101,7 +102,7 @@ impl Databaser {
             busy: None,
             busy_action: None,
             scanning: true,
-            setting_up: false,
+            elevation_busy: false,
             mode: ControlMode::Uac,
             error: None,
             theme: settings.theme,
@@ -219,10 +220,10 @@ impl Databaser {
     // ---- privileged actions ---------------------------------------------
 
     fn setup_elevated(&mut self, cx: &mut Context<Self>) {
-        if self.setting_up {
+        if self.elevation_busy {
             return;
         }
-        self.setting_up = true;
+        self.elevation_busy = true;
         cx.notify();
 
         cx.spawn(async move |entity, cx| {
@@ -238,19 +239,19 @@ impl Databaser {
 
             entity
                 .update(cx, |this, cx| {
-                    this.setting_up = false;
+                    this.elevation_busy = false;
                     match result {
                         Ok(()) => {
                             this.mode = ControlMode::Task;
                             this.push_toast(
                                 ToastKind::Success,
-                                "Elevated control is ready \u{2014} start/stop no longer prompts."
+                                "No-prompt control is on \u{2014} Start/Stop no longer prompt."
                                     .to_string(),
                             );
                         }
                         Err(TaskError::Cancelled) => this.push_toast(
                             ToastKind::Warning,
-                            "Setup cancelled \u{2014} administrator rights are required once."
+                            "Setup cancelled \u{2014} administrator rights are needed once."
                                 .to_string(),
                         ),
                         Err(error) => this.push_toast(ToastKind::Error, error.to_string()),
@@ -263,6 +264,12 @@ impl Databaser {
     }
 
     fn remove_elevated(&mut self, cx: &mut Context<Self>) {
+        if self.elevation_busy {
+            return;
+        }
+        self.elevation_busy = true;
+        cx.notify();
+
         cx.spawn(async move |entity, cx| {
             let result = cx
                 .background_executor()
@@ -271,14 +278,21 @@ impl Databaser {
 
             entity
                 .update(cx, |this, cx| {
+                    this.elevation_busy = false;
                     match result {
                         Ok(()) => {
                             this.mode = ControlMode::Uac;
                             this.push_toast(
                                 ToastKind::Success,
-                                "Elevated control removed.".to_string(),
+                                "No-prompt control is off \u{2014} Start/Stop will prompt again."
+                                    .to_string(),
                             );
                         }
+                        Err(TaskError::RemoveCancelled) => this.push_toast(
+                            ToastKind::Warning,
+                            "Removal cancelled \u{2014} administrator rights are needed to remove it."
+                                .to_string(),
+                        ),
                         Err(error) => this.push_toast(ToastKind::Error, error.to_string()),
                     }
                     cx.notify();
@@ -745,7 +759,7 @@ impl Databaser {
         let entity = cx.entity();
         let theme = self.theme;
         let mode = self.mode;
-        let setting_up = self.setting_up;
+        let elevation_busy = self.elevation_busy;
         let autostart = self.autostart;
         let background = self.settings.background;
 
@@ -800,7 +814,7 @@ impl Databaser {
                         PopupMenuItem::new("No-prompt control")
                             .icon(icon(IconName::ShieldCheck))
                             .checked(mode == ControlMode::Task)
-                            .disabled(setting_up || mode == ControlMode::Elevated)
+                            .disabled(elevation_busy || mode == ControlMode::Elevated)
                             .on_click({
                                 let entity = entity.clone();
                                 move |_, _, cx| {

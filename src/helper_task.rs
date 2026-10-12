@@ -39,6 +39,12 @@ pub enum TaskError {
 
     #[error("setting up elevated control failed: {0}")]
     Setup(String),
+
+    #[error("removing elevated control was cancelled")]
+    RemoveCancelled,
+
+    #[error("removing elevated control failed: {0}")]
+    Teardown(String),
 }
 
 /// Request file the GUI writes and the task's helper reads.
@@ -191,20 +197,51 @@ pub fn write_response(ok: bool, error: &str) {
 }
 
 /// Delete the scheduled task, reverting to the per-action UAC prompt.
+///
+/// The task is registered *Run with highest privileges*, so changing it needs
+/// administrator rights as well: deleting it unelevated fails with "Access is
+/// denied", regardless of the account that registered it. That is why this
+/// elevates, and why it can prompt once — exactly like setup, and for the same
+/// reason.
 pub fn remove() -> Result<(), TaskError> {
-    let status = system_tool("schtasks.exe")
-        .args(["/delete", "/tn", TASK_NAME, "/f"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map_err(TaskError::Io)?;
+    let script_path = std::env::temp_dir().join("databaser-teardown.ps1");
+    std::fs::write(&script_path, teardown_script()).map_err(TaskError::Io)?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(TaskError::Setup(
-            "could not delete the scheduled task (it may need administrator rights)".to_string(),
-        ))
+    let result = runas::Command::new(powershell_path())
+        .args(&[
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+        ])
+        .arg(&script_path)
+        .status();
+
+    let _ = std::fs::remove_file(&script_path);
+
+    match result {
+        // Confirm rather than assume: a refused deletion must not be reported
+        // as success, or the toggle would be a one-way door again.
+        Ok(status) if status.success() && !is_registered() => Ok(()),
+        Ok(status) => Err(TaskError::Teardown(format!(
+            "the task is still registered (exit code {})",
+            status.code().unwrap_or(-1)
+        ))),
+        Err(err) if is_uac_cancelled(&err) => Err(TaskError::RemoveCancelled),
+        Err(err) => Err(TaskError::Teardown(err.to_string())),
     }
+}
+
+/// Whether the task exists, whatever it points at.
+fn is_registered() -> bool {
+    system_tool("schtasks.exe")
+        .args(["/query", "/tn", TASK_NAME])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 fn setup_script(exe: &Path) -> String {
@@ -217,6 +254,17 @@ fn setup_script(exe: &Path) -> String {
          $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Highest\n\
          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)\n\
          Register-ScheduledTask -TaskName '{TASK_NAME}' -Action $action -Principal $principal -Settings $settings -Force | Out-Null\n"
+    )
+}
+
+fn teardown_script() -> String {
+    // `schtasks` is a native command, so `$ErrorActionPreference` does not turn
+    // a failure into a script failure. Propagate its exit code instead, or the
+    // caller would read a refused deletion as success.
+    format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         schtasks.exe /delete /tn '{TASK_NAME}' /f | Out-Null\n\
+         if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}\n"
     )
 }
 
