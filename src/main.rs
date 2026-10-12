@@ -5,6 +5,7 @@
 //   * `--ctl`:  a short-lived elevated helper that performs one SCM action
 
 mod app;
+mod assets;
 mod ctl;
 mod elevation;
 mod helper_task;
@@ -22,7 +23,7 @@ fn main() {
     }
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(assets::AppAssets)
         .run(|cx| {
             gpui_kit::init(cx);
             cx.set_app_identity("com.abraham.databaser", "Databaser");
@@ -43,6 +44,8 @@ fn window_options() -> WindowOptions {
     let bounds = Bounds::new(point(px(220.), px(160.)), size(px(760.), px(600.)));
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
+        // Keep the layout usable: below this the cards reflow rather than clip.
+        window_min_size: Some(size(px(520.), px(360.))),
         titlebar: Some(TitlebarOptions {
             title: Some("Databaser".into()),
             ..Default::default()

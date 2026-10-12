@@ -1323,13 +1323,14 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "databaser"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "gpui-kit",
  "runas",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "windows-service",
- "winreg 0.55.0",
+ "winreg",
  "winresource",
 ]
 
@@ -1520,7 +1521,7 @@ dependencies = [
  "rustc_version",
  "toml 1.1.8+spec-1.1.0",
  "vswhom",
- "winreg 0.56.0",
+ "winreg",
 ]
 
 [[package]]
@@ -5777,7 +5778,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8469,16 +8470,6 @@ dependencies = [
 
 [[package]]
 name = "winreg"
-version = "0.55.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
-dependencies = [
- "cfg-if",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "winreg"
 version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
@@ -8489,9 +8480,9 @@ dependencies = [
 
 [[package]]
 name = "winresource"
-version = "0.1.31"
+version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
+checksum = "af0372eb558f476d9cb0b557558a2dae35953af999ec5f0e9fd115e0e89b5cb1"
 dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "version_check",

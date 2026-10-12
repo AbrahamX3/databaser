@@ -1,16 +1,24 @@
-//! The Databaser window: header with the theme switch, a list of discovered
-//! database service cards, and inline/transient feedback.
+//! The Databaser window.
+//!
+//! Layout follows a restrained "glass plate in a tray" motif: every card is a
+//! soft outer shell (a faint tint plus a hairline) wrapping a raised inner
+//! surface, with generous spacing and a single, quiet menu for all settings.
 
 use std::time::Duration;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::base::Disableable as _;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, Theme, ThemeMode, WindowExt as _};
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, Sizable as _, Side, Theme, ThemeMode, WindowExt as _,
+};
 use gpui_kit::*;
 
+use crate::assets::APP_ICON;
 use crate::elevation::{self, ActionOutcome, ControlMode};
 use crate::helper_task::{self, TaskError};
 use crate::services::{self, ServiceAction, ServiceInfo, ServiceKind, ServiceState};
@@ -18,6 +26,8 @@ use crate::settings::{Settings, ThemePreference};
 
 /// How often the service states are re-read while the window is open.
 const POLL_INTERVAL: Duration = Duration::from_millis(2000);
+
+const GITHUB_URL: &str = "github.com/abraham/databaser";
 
 #[derive(Clone, Copy)]
 enum ToastKind {
@@ -68,6 +78,8 @@ impl Databaser {
         this
     }
 
+    // ---- data -----------------------------------------------------------
+
     fn spawn_discovery(cx: &mut Context<Self>) {
         cx.spawn(async move |entity, cx| {
             let result = cx
@@ -108,7 +120,6 @@ impl Databaser {
         .detach();
     }
 
-    /// Re-discover services (used by the Rescan button).
     fn rescan(&mut self, cx: &mut Context<Self>) {
         if self.scanning {
             return;
@@ -118,15 +129,12 @@ impl Databaser {
         Self::spawn_discovery(cx);
     }
 
-    /// Re-read service states on a background thread so the UI thread never
-    /// blocks on the SCM.
+    /// Re-read service states off the UI thread.
     fn spawn_poll(cx: &mut Context<Self>) {
         cx.spawn(async move |entity, cx| {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
 
-                // Collect the names to check on the UI thread (cheap), then do
-                // the actual SCM queries off it.
                 let names = match entity.update(cx, |this, _| {
                     if this.busy.is_some() {
                         return None;
@@ -164,7 +172,8 @@ impl Databaser {
         .detach();
     }
 
-    /// Install the no-prompt scheduled task (one UAC prompt).
+    // ---- privileged actions ---------------------------------------------
+
     fn setup_elevated(&mut self, cx: &mut Context<Self>) {
         if self.setting_up {
             return;
@@ -209,10 +218,32 @@ impl Databaser {
         .detach();
     }
 
-    /// Start / stop / restart, using whichever control mode is available.
-    ///
-    /// The work can block on a UAC prompt or on the helper process, so it runs
-    /// on the background executor rather than the UI thread.
+    fn remove_elevated(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |entity, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async { helper_task::remove() })
+                .await;
+
+            entity
+                .update(cx, |this, cx| {
+                    match result {
+                        Ok(()) => {
+                            this.mode = ControlMode::Uac;
+                            this.push_toast(
+                                ToastKind::Success,
+                                "Elevated control removed.".to_string(),
+                            );
+                        }
+                        Err(error) => this.push_toast(ToastKind::Error, error.to_string()),
+                    }
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
     fn request_action(&mut self, name: String, action: ServiceAction, cx: &mut Context<Self>) {
         if self.busy.is_some() {
             return;
@@ -272,97 +303,153 @@ impl Databaser {
         cx.notify();
     }
 
+    // ---- chrome ----------------------------------------------------------
+
     fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = self.theme;
-        let scanning = self.scanning;
-
-        let mut actions = div().flex().flex_row().items_center().gap_2();
-
-        if self.mode == ControlMode::Uac {
-            let setting_up = self.setting_up;
-            actions = actions.child(
-                Button::new("setup-elevated")
-                    .small()
-                    .label(if setting_up {
-                        "Setting up\u{2026}"
-                    } else {
-                        "Enable no-prompt control"
-                    })
-                    .disabled(setting_up)
-                    .on_click(cx.listener(|this, _, _window, cx| this.setup_elevated(cx))),
-            );
-        }
-
-        actions = actions
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .px(px(28.))
+            .py(px(20.))
+            .border_b_1()
+            .border_color(cx.theme().border)
             .child(
-                Button::new("rescan")
-                    .ghost()
-                    .small()
-                    .label(if scanning { "Scanning\u{2026}" } else { "Rescan" })
-                    .on_click(cx.listener(|this, _, _window, cx| this.rescan(cx))),
+                div()
+                    .flex_grow(1.0)
+                    .flex_shrink(1.0)
+                    .text_xl()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Databaser"),
             )
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .flex_shrink(0.0)
                     .items_center()
-                    .gap_1()
-                    .child(self.theme_button("System", ThemePreference::System, theme, cx))
-                    .child(self.theme_button("Light", ThemePreference::Light, theme, cx))
-                    .child(self.theme_button("Dark", ThemePreference::Dark, theme, cx)),
-            );
-
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .px_4()
-            .py_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Databaser"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!(
-                                "v{} \u{00b7} {}",
-                                env!("CARGO_PKG_VERSION"),
-                                self.mode.label()
-                            )),
-                    ),
+                    .gap_3()
+                    .child(self.scan_indicator(cx))
+                    .child(self.settings_menu(cx)),
             )
-            .child(actions)
     }
 
-    fn theme_button(
-        &self,
-        label: &'static str,
-        pref: ThemePreference,
-        current: ThemePreference,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let base = Button::new(label).small().label(label);
-        let styled = if current == pref {
-            base.primary()
-        } else {
-            base.ghost()
-        };
-        styled.on_click(cx.listener(move |this, _, window, cx| this.set_theme(pref, window, cx)))
+    fn scan_indicator(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut row = div().flex().flex_row().items_center().gap_2();
+        if self.scanning {
+            row = row.child(Spinner::new().small()).child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Scanning\u{2026}"),
+            );
+        }
+        row
+    }
+
+    fn settings_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let entity = cx.entity();
+        let theme = self.theme;
+        let mode = self.mode;
+        let setting_up = self.setting_up;
+
+        Button::new("settings-menu")
+            .icon(icon(IconName::Ellipsis))
+            .tooltip("Menu")
+            .ghost()
+            .small()
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
+                let menu = menu
+                    .item(
+                        PopupMenuItem::new("Rescan")
+                            .icon(icon(IconName::RefreshCw))
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    entity.update(cx, Databaser::rescan);
+                                }
+                            }),
+                    )
+                    .separator();
+
+                let menu = menu
+                    .submenu_with_icon(
+                        Some(icon(IconName::Palette)),
+                        "Theme",
+                        window,
+                        cx,
+                        {
+                            let entity = entity.clone();
+                            move |menu, _, _| {
+                                // Ticks go on the right so the theme icon can use
+                                // the left slot, matching every other item.
+                                let menu = menu.check_side(Side::Right);
+                                menu.item(theme_item(
+                                    "System",
+                                    ThemePreference::System,
+                                    theme,
+                                    IconName::Monitor,
+                                    &entity,
+                                ))
+                                .item(theme_item(
+                                    "Light",
+                                    ThemePreference::Light,
+                                    theme,
+                                    IconName::Sun,
+                                    &entity,
+                                ))
+                                .item(theme_item(
+                                    "Dark",
+                                    ThemePreference::Dark,
+                                    theme,
+                                    IconName::Moon,
+                                    &entity,
+                                ))
+                            }
+                        },
+                    )
+                    .separator();
+
+                let menu = menu
+                    .submenu_with_icon(Some(icon(IconName::Settings)), "Advanced", window, cx, {
+                        let entity = entity.clone();
+                        move |menu, _, _| {
+                            let enable = PopupMenuItem::new("Enable no-prompt control")
+                                .icon(icon(IconName::ShieldCheck))
+                                .disabled(mode != ControlMode::Uac || setting_up)
+                                .on_click({
+                                    let entity = entity.clone();
+                                    move |_, _, cx| {
+                                        entity.update(cx, Databaser::setup_elevated);
+                                    }
+                                });
+                            let remove = PopupMenuItem::new("Remove elevated control")
+                                .icon(icon(IconName::ShieldOff))
+                                .disabled(mode != ControlMode::Task)
+                                .on_click({
+                                    let entity = entity.clone();
+                                    move |_, _, cx| {
+                                        entity.update(cx, Databaser::remove_elevated);
+                                    }
+                                });
+                            menu.item(enable).item(remove)
+                        }
+                    })
+                    .separator();
+
+                menu.item(
+                    PopupMenuItem::new("About Databaser")
+                        .icon(icon(IconName::Info))
+                        .on_click(|_, window, cx| open_about(window, cx)),
+                )
+            })
     }
 
     fn error_banner(&self, message: &str) -> impl IntoElement {
-        div().px_4().pt_3().child(
+        div().px(px(28.)).pt(px(20.)).child(
             Alert::error("discovery-error", message.to_string())
                 .title("Something went wrong")
                 .banner(),
@@ -370,18 +457,18 @@ impl Databaser {
     }
 
     fn centered_message(&self, text: &str, cx: &mut Context<Self>) -> impl IntoElement {
-        let scanning = self.scanning;
         div()
             .flex()
             .flex_col()
             .size_full()
             .items_center()
             .justify_center()
-            .gap_3()
-            .child(if scanning {
+            .gap_4()
+            .child(if self.scanning {
                 Spinner::new().into_any_element()
             } else {
                 div()
+                    .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child(text.to_string())
                     .into_any_element()
@@ -389,6 +476,7 @@ impl Databaser {
             .child(
                 Button::new("rescan-empty")
                     .label("Scan again")
+                    .outline()
                     .on_click(cx.listener(|this, _, _window, cx| this.rescan(cx))),
             )
     }
@@ -401,8 +489,8 @@ impl Databaser {
             .id("service-list")
             .flex()
             .flex_col()
-            .gap_3()
-            .p_4()
+            .gap_4()
+            .p(px(28.))
             .overflow_y_scroll()
             .size_full()
             .children(self.services.iter().map(|info| {
@@ -411,6 +499,7 @@ impl Databaser {
             }))
     }
 
+    /// A card rendered as an outer tray wrapping a raised inner surface.
     fn service_card(
         &self,
         info: &ServiceInfo,
@@ -423,17 +512,22 @@ impl Databaser {
         let left = div()
             .flex()
             .flex_col()
-            .gap_1()
+            .flex_grow(1.0)
+            .flex_shrink(1.0)
+            .gap_2()
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .flex_wrap()
                     .items_center()
-                    .gap_2()
-                    .child(kind_badge(info.kind, cx))
+                    .gap_3()
+                    .child(kind_badge(info.kind))
                     .child(
                         div()
+                            .text_base()
                             .font_weight(FontWeight::MEDIUM)
+                            .whitespace_normal()
                             .child(info.display_name.clone()),
                     ),
             )
@@ -441,14 +535,15 @@ impl Databaser {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("service: {}", info.name)),
+                    .child(format!("service \u{00b7} {}", info.name)),
             );
 
         let right = div()
             .flex()
             .flex_row()
+            .flex_shrink(0.0)
             .items_center()
-            .gap_3()
+            .gap_4()
             .child(state_indicator(info.state, cx))
             .child(
                 div()
@@ -466,29 +561,26 @@ impl Databaser {
                     )),
             );
 
-        div()
+        let core = div()
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_center()
             .justify_between()
-            .gap_3()
-            .p_3()
+            .gap_4()
+            .p(px(18.))
             .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().border)
             .bg(cx.theme().secondary)
             .child(left)
-            .child(right)
-    }
-}
+            .child(right);
 
-impl ControlMode {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Elevated => "elevated",
-            Self::Task => "no-prompt control",
-            Self::Uac => "prompt per action",
-        }
+        div()
+            .p(px(5.))
+            .rounded_xl()
+            .bg(cx.theme().muted)
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(core)
     }
 }
 
@@ -496,10 +588,8 @@ impl Render for Databaser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         flush_toasts(&mut self.toasts, window, cx);
 
-        let scanning = self.scanning;
         let has_services = !self.services.is_empty();
-
-        let body = if scanning {
+        let body = if self.scanning {
             self.centered_message("Looking for database services\u{2026}", cx)
                 .into_any_element()
         } else if has_services {
@@ -523,6 +613,114 @@ impl Render for Databaser {
 
         root.child(div().flex_1().overflow_hidden().child(body))
     }
+}
+
+fn theme_item(
+    label: &str,
+    pref: ThemePreference,
+    current: ThemePreference,
+    icon_name: IconName,
+    entity: &Entity<Databaser>,
+) -> PopupMenuItem {
+    let entity = entity.clone();
+    PopupMenuItem::new(label)
+        .icon(icon(icon_name))
+        .checked(current == pref)
+        .on_click(move |_, window, cx| {
+            entity.update(cx, |this, cx| this.set_theme(pref, window, cx));
+        })
+}
+
+fn open_about(window: &mut Window, cx: &mut App) {
+    window.open_dialog(cx, |dialog, _window, cx| {
+        dialog
+            .title("About Databaser")
+            .close_button(true)
+            .w(px(440.))
+            .child(about_content(cx))
+    });
+}
+
+fn about_content(cx: &App) -> impl IntoElement {
+    let muted = cx.theme().muted_foreground;
+
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap_4()
+        .py_2()
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .w_full()
+                .gap_4()
+                .child(icon_tile(cx))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Databaser"),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                        ),
+                ),
+        )
+        .child(
+            div().w_full().text_sm().text_color(muted).child(
+                "Start, stop and restart your local MySQL and PostgreSQL services, without opening Task Manager.",
+            ),
+        )
+        .child(div().h(px(1.)).w_full().bg(cx.theme().border))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("SOURCE"),
+                )
+                .child(div().text_sm().text_color(cx.theme().link).child(GITHUB_URL)),
+        )
+        .child(
+            div()
+                .w_full()
+                .text_xs()
+                .text_color(muted)
+                .child("Built with Rust and GPUI Kit \u{00b7} MIT licensed"),
+        )
+}
+
+/// The brand icon inside a nested tray, matching the card treatment.
+fn icon_tile(cx: &App) -> impl IntoElement {
+    div()
+        .p(px(5.))
+        .rounded_xl()
+        .bg(cx.theme().muted)
+        .border_1()
+        .border_color(cx.theme().border)
+        .child(
+            div()
+                .size(px(64.))
+                .rounded_lg()
+                .bg(cx.theme().secondary)
+                .child(img(APP_ICON).size(px(64.))),
+        )
 }
 
 fn action_buttons(
@@ -555,7 +753,8 @@ fn action_buttons(
         let restart_name = name.to_string();
         vec![
             Button::new(format!("stop-{name}"))
-                .label("Stop")
+                .icon(icon(IconName::Square))
+                .tooltip("Stop")
                 .danger()
                 .disabled(!can_act)
                 .on_click(cx.listener(move |this, _, _window, cx| {
@@ -563,7 +762,8 @@ fn action_buttons(
                 }))
                 .into_any_element(),
             Button::new(format!("restart-{name}"))
-                .label("Restart")
+                .icon(icon(IconName::RotateCcw))
+                .tooltip("Restart")
                 .outline()
                 .disabled(!can_act)
                 .on_click(cx.listener(move |this, _, _window, cx| {
@@ -574,7 +774,8 @@ fn action_buttons(
     } else {
         let start_name = name.to_string();
         vec![Button::new(format!("start-{name}"))
-            .label("Start")
+            .icon(icon(IconName::Play))
+            .tooltip("Start")
             .primary()
             .disabled(!can_act)
             .on_click(cx.listener(move |this, _, _window, cx| {
@@ -584,15 +785,28 @@ fn action_buttons(
     }
 }
 
-fn kind_badge(kind: ServiceKind, cx: &mut Context<Databaser>) -> impl IntoElement {
+fn kind_badge(kind: ServiceKind) -> impl IntoElement {
     div()
-        .px(px(8.))
+        .px(px(7.))
         .py(px(2.))
-        .rounded_md()
+        .rounded_full()
         .text_xs()
-        .bg(cx.theme().accent)
-        .text_color(cx.theme().accent_foreground)
-        .child(kind.label())
+        .bg(kind_color(kind))
+        .text_color(white())
+        .child(kind.label().to_string())
+}
+
+/// A quiet, product-specific tint for the eyebrow badge.
+fn kind_color(kind: ServiceKind) -> Rgba {
+    match kind {
+        ServiceKind::MySql => rgb(0x2f6f9f),
+        ServiceKind::PostgreSql => rgb(0x41618a),
+    }
+}
+
+/// Shorthand for an icon from the shared catalog.
+fn icon(name: IconName) -> Icon {
+    Icon::new(name)
 }
 
 fn state_indicator(state: ServiceState, cx: &mut Context<Databaser>) -> impl IntoElement {
@@ -607,6 +821,7 @@ fn state_indicator(state: ServiceState, cx: &mut Context<Databaser>) -> impl Int
     div()
         .flex()
         .flex_row()
+        .flex_shrink(0.0)
         .items_center()
         .gap_2()
         .child(div().size(px(8.)).rounded_full().bg(color))

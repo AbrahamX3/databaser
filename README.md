@@ -18,8 +18,12 @@ Built in Rust with [GPUI Kit](https://gpui-kit.com) (`gpui-kit` 0.7.1).
   - **Stopped** → `Start`
   - **Running** → `Stop` and `Restart`
   - While an action runs the buttons are replaced by a spinner.
-- Three-way theme switch: **System / Light / Dark**, defaulting to System and
-  remembered between launches.
+- A single **Menu** holds everything else:
+  - **Rescan**
+  - **Theme** → *System* (follows Windows) / *Light* / *Dark*, remembered between
+    launches and ticking the active choice
+  - **Advanced** → *Enable no-prompt control* / *Remove elevated control*
+  - **About Databaser** → a dialog with the icon, name, version and source link
 
 ## Running it
 
@@ -71,7 +75,8 @@ reverts to the per-action prompt.
 ```
 src/
   main.rs        # entry point; dispatches GUI vs. helper modes
-  app.rs         # the GPUI window, state, polling and action handling
+  app.rs         # the GPUI window: header + menu, cards, About dialog
+  assets.rs      # serves the embedded brand icon over GPUI Kit's defaults
   elevation.rs   # control-mode selection, per-action UAC fallback
   helper_task.rs # no-prompt control: the scheduled-task setup + client
   ctl.rs         # privileged helper entry points (--ctl / --ctl-from-task)
@@ -83,6 +88,14 @@ src/
     control.rs   # start / stop / restart (runs elevated)
 build.rs         # Windows exe metadata + icon
 ```
+
+## Icon
+
+`assets/icon.svg` is the app's icon artwork; it is also rendered in the About
+dialog. `assets/icon.ico` is the same artwork in Windows icon format, embedded
+into the executable by `build.rs` — that is what Windows shows in the **title
+bar, taskbar and Alt-Tab**. Both files are committed and need no tooling to
+build.
 
 ## Development
 
@@ -104,4 +117,4 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 - [ ] Listening ports (3306 / 5432) and server versions on each card
 - [ ] Start-up mode toggle (Automatic / Manual) per service
 - [ ] Settings screen
-- [ ] App icon and an installer
+- [ ] Installer

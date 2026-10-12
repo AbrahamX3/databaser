@@ -1,4 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0284c7"/>
-  <text x="32" y="32" dy="0.35em" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="32" font-weight="600" fill="#ffffff">D</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Databaser">
+  <!-- near-black squircle with a hairline edge, matching the app's surfaces -->
+  <rect width="64" height="64" rx="15" fill="#0C0E12"/>
+  <rect x="0.9" y="0.9" width="62.2" height="62.2" rx="14.1" fill="none"
+        stroke="#ffffff" stroke-opacity="0.30" stroke-width="1.6"/>
+
+  <!-- database cylinder: solid body with two carved disc separators -->
+  <path d="M19 21A13 5.5 0 0 1 45 21V43A13 5.5 0 0 1 19 43Z" fill="#F3F5F8"/>
+  <path d="M19 31A13 5.5 0 0 0 45 31" fill="none" stroke="#0C0E12" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M19 38A13 5.5 0 0 0 45 38" fill="none" stroke="#0C0E12" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- power badge: a solid disc with the glyph carved out of it -->
+  <circle cx="47" cy="47" r="16.5" fill="#0C0E12"/>
+  <circle cx="47" cy="47" r="12.5" fill="#F3F5F8"/>
+  <path d="M47 41v5.6" stroke="#0C0E12" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M43.1 43.9a6.2 6.2 0 1 0 7.8 0" fill="none" stroke="#0C0E12" stroke-width="2.6" stroke-linecap="round"/>
 </svg>

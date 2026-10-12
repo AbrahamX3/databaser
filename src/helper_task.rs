@@ -190,6 +190,23 @@ pub fn write_response(ok: bool, error: &str) {
     }
 }
 
+/// Delete the scheduled task, reverting to the per-action UAC prompt.
+pub fn remove() -> Result<(), TaskError> {
+    let status = system_tool("schtasks.exe")
+        .args(["/delete", "/tn", TASK_NAME, "/f"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(TaskError::Io)?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(TaskError::Setup(
+            "could not delete the scheduled task (it may need administrator rights)".to_string(),
+        ))
+    }
+}
+
 fn setup_script(exe: &Path) -> String {
     // Single-quote the path for PowerShell and escape embedded quotes.
     let exe = exe.to_string_lossy().replace('\'', "''");
