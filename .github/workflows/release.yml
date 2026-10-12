@@ -26,15 +26,32 @@ jobs:
       # The asset name must contain the target triple: the in-app updater
       # (self_update) matches release assets by looking for the target string,
       # and extracts `databaser.exe` from the archive root.
-      - name: Package
+      - name: Package portable archive
         shell: pwsh
         run: |
           $target = "x86_64-pc-windows-msvc"
           $asset = "databaser-$target.zip"
           New-Item -ItemType Directory -Force dist | Out-Null
           Compress-Archive -Path target/release/databaser.exe -DestinationPath "dist/$asset" -Force
-          $hash = (Get-FileHash "dist/$asset" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $asset" | Set-Content dist/SHA256SUMS -Encoding ascii
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          Write-Output "Building installer for version $version"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" packaging\databaser.iss
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem dist -File | Where-Object { $_.Name -notlike "*.sha256" } | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          }
+          $lines | Set-Content dist/SHA256SUMS -Encoding ascii
           Get-Content dist/SHA256SUMS
 
       - name: Publish release
@@ -42,5 +59,6 @@ jobs:
         with:
           files: |
             dist/databaser-x86_64-pc-windows-msvc.zip
+            dist/Databaser-Setup-*.exe
             dist/SHA256SUMS
           generate_release_notes: true

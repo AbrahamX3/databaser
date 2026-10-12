@@ -1,6 +1,9 @@
 # Build output
 /target
 
+# Generated release artifacts (packaged by CI)
+/dist
+
 # Logs
 *.log
 
