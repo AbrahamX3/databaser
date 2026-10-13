@@ -51,10 +51,7 @@ pub fn detect_mode() -> ControlMode {
     if is_elevated() {
         return ControlMode::Elevated;
     }
-    let Ok(exe) = std::env::current_exe() else {
-        return ControlMode::Uac;
-    };
-    if helper_task::is_registered_for(&exe) {
+    if helper_task::is_usable() {
         ControlMode::Task
     } else {
         ControlMode::Uac

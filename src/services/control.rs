@@ -49,7 +49,7 @@ pub fn run_action(action: ServiceAction, name: &str) -> Result<(), ServiceError>
     reason = "ChangeServiceConfigW has no safe wrapper for a start-type-only update"
 )]
 fn set_start_type(name: &str, start_type: StartType) -> Result<(), ServiceError> {
-    let service = open(name, ServiceAccess::CHANGE_CONFIG)?;
+    let service = open(name, ServiceAccess::CHANGE_CONFIG | ServiceAccess::QUERY_CONFIG)?;
 
     let win_start_type = match start_type {
         StartType::Automatic => WinStartType::AutoStart,
@@ -80,6 +80,22 @@ fn set_start_type(name: &str, start_type: StartType) -> Result<(), ServiceError>
             "change the start-up type of",
             name,
             windows_service::Error::Winapi(io::Error::last_os_error()),
+        ));
+    }
+
+    // Read it back rather than trusting the return value: the UI must never
+    // report a start type that the Service Control Manager did not take.
+    let applied = service
+        .query_config()
+        .ok()
+        .map(|config| config.start_type.to_raw());
+    if applied != Some(win_start_type.to_raw()) {
+        return Err(ServiceError::control(
+            "confirm the start-up type of",
+            name,
+            windows_service::Error::Winapi(io::Error::other(
+                "the Service Control Manager did not apply the change",
+            )),
         ));
     }
 

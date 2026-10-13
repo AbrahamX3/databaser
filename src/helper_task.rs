@@ -64,21 +64,48 @@ fn state_dir() -> PathBuf {
         .join("Databaser")
 }
 
-/// True when the scheduled task exists *and* runs the given executable (so a
-/// moved or rebuilt binary is detected and setup is offered again).
-pub fn is_registered_for(exe: &Path) -> bool {
-    let Ok(output) = system_tool("schtasks.exe")
+/// Whether no-prompt control is set up and still usable on this machine.
+///
+/// The task performs its actions through the shared request and response files,
+/// so *which copy* of the executable it launches does not matter as long as that
+/// copy is still there. Requiring an exact match with the running binary made
+/// the toggle silently read as off whenever the app was started from a different
+/// build of itself - a debug build beside the installed one, say - which is not
+/// what "no-prompt control is on" means.
+pub fn is_usable() -> bool {
+    registered_command().is_some_and(|command| Path::new(&command).is_file())
+}
+
+/// The program the task launches, or `None` when there is no such task.
+fn registered_command() -> Option<String> {
+    let output = system_tool("schtasks.exe")
         .args(["/query", "/tn", TASK_NAME, "/xml"])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
-    else {
-        return false;
-    };
+        .ok()?;
     if !output.status.success() {
-        return false;
+        return None;
     }
-    let xml = String::from_utf8_lossy(&output.stdout).to_lowercase();
-    xml.contains(&exe.to_string_lossy().to_lowercase())
+    extract_command(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Pull `<Command>` out of the task definition.
+///
+/// The value is XML-escaped, so a path containing `&` arrives as `&amp;`.
+fn extract_command(xml: &str) -> Option<String> {
+    const OPEN: &str = "<Command>";
+    let start = xml.find(OPEN)? + OPEN.len();
+    let end = start + xml[start..].find("</Command>")?;
+    let command = xml[start..end].trim();
+
+    (!command.is_empty()).then(|| {
+        command
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&")
+    })
 }
 
 /// Register (or re-register) the highest-privileges task. Prompts for UAC once.
@@ -288,4 +315,35 @@ fn system32() -> PathBuf {
 
 fn is_uac_cancelled(err: &std::io::Error) -> bool {
     err.raw_os_error() == Some(1223) || err.to_string().to_lowercase().contains("cancel")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_command;
+
+    #[test]
+    fn reads_the_command_out_of_a_task_definition() {
+        let xml = r#"<Task><Actions><Exec>
+            <Command>C:\Users\Abraham\AppData\Local\Programs\Databaser\databaser.exe</Command>
+            <Arguments>--ctl-from-task</Arguments>
+        </Exec></Actions></Task>"#;
+        assert_eq!(
+            extract_command(xml).as_deref(),
+            Some(r"C:\Users\Abraham\AppData\Local\Programs\Databaser\databaser.exe")
+        );
+    }
+
+    #[test]
+    fn unescapes_an_ampersand_in_the_path() {
+        let xml = r"<Command>C:\Tools &amp; Bits\databaser.exe</Command>";
+        assert_eq!(
+            extract_command(xml).as_deref(),
+            Some(r"C:\Tools & Bits\databaser.exe")
+        );
+    }
+
+    #[test]
+    fn a_task_without_a_command_reads_as_none() {
+        assert_eq!(extract_command("<Task></Task>"), None);
+    }
 }
