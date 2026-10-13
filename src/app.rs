@@ -349,14 +349,17 @@ impl Databaser {
                             // Reflect the new start type immediately; the poll
                             // only re-reads states, not configuration.
                             if let ServiceAction::SetStartType(start_type) = action {
-                                if let Some(service) =
-                                    this.services.iter_mut().find(|service| service.name == name)
-                                {
-                                    service.start_type = start_type;
-                                }
+                                let running =
+                                    match this.services.iter_mut().find(|s| s.name == name) {
+                                        Some(service) => {
+                                            service.start_type = start_type;
+                                            service.state.is_running()
+                                        }
+                                        None => false,
+                                    };
                                 this.push_toast(
                                     ToastKind::Success,
-                                    format!("{name} \u{2014} {}", start_type.effect()),
+                                    start_type_message(&name, start_type, running),
                                 );
                             } else {
                                 this.push_toast(
@@ -1458,6 +1461,24 @@ fn should_offer_update(manual: bool, available: &str, skipped: Option<&str>) -> 
     manual || skipped != Some(available)
 }
 
+/// Confirmation for a start-up type change.
+///
+/// A start type applies at boot: it neither stops a running service nor starts
+/// a stopped one. Both look like nothing happened, so say which it is — that
+/// is the difference between "it did not work" and "it will not take effect
+/// until you reboot".
+fn start_type_message(name: &str, start_type: StartType, running: bool) -> String {
+    let mut message = format!("{name} \u{2014} {}", start_type.effect());
+    match (running, start_type) {
+        (true, StartType::Manual | StartType::Disabled) => {
+            message.push_str(" It keeps running until you stop it.");
+        }
+        (false, StartType::Automatic) => message.push_str(" It will start at the next boot."),
+        _ => {}
+    }
+    message
+}
+
 /// Closing the window hides it to the tray while "Run in background" is on, and
 /// exits the app otherwise.
 pub fn window_should_close(_window: &mut Window, cx: &mut App) -> bool {
@@ -1479,8 +1500,34 @@ pub fn apply_theme(pref: ThemePreference, window: Option<&mut Window>, cx: &mut 
 
 #[cfg(test)]
 mod tests {
-    use super::{should_offer_update, REPOSITORY_URL};
+    use super::{should_offer_update, start_type_message, REPOSITORY_URL};
+    use crate::services::StartType;
     use crate::update::{REPO_NAME, REPO_OWNER};
+
+    #[test]
+    fn disabling_a_running_service_says_it_keeps_running() {
+        let message = start_type_message("MSSQL$SQLEXPRESS", StartType::Disabled, true);
+        assert!(message.contains("won't start until it is re-enabled"), "{message}");
+        assert!(message.contains("keeps running until you stop it"), "{message}");
+    }
+
+    #[test]
+    fn disabling_a_stopped_service_says_nothing_extra() {
+        let message = start_type_message("MSSQL$SQLEXPRESS", StartType::Disabled, false);
+        assert!(!message.contains("keeps running"), "{message}");
+    }
+
+    #[test]
+    fn setting_automatic_on_a_stopped_service_says_it_waits_for_boot() {
+        let message = start_type_message("MySQL80", StartType::Automatic, false);
+        assert!(message.contains("at the next boot"), "{message}");
+    }
+
+    #[test]
+    fn setting_automatic_on_a_running_service_says_nothing_extra() {
+        let message = start_type_message("MySQL80", StartType::Automatic, true);
+        assert!(!message.contains("next boot"), "{message}");
+    }
 
     #[test]
     fn about_dialog_repository_url_matches_the_updater() {

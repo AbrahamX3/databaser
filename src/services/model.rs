@@ -82,7 +82,7 @@ impl StartType {
         match self {
             Self::Automatic => "starts automatically with Windows",
             Self::Manual => "starts only when you start it",
-            Self::Disabled => "will not start at all until it is re-enabled",
+            Self::Disabled => "won't start until it is re-enabled",
         }
     }
 
