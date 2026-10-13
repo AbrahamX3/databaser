@@ -35,6 +35,13 @@ pub struct Settings {
     /// A version the user dismissed, so the banner does not reappear for it.
     #[serde(default)]
     pub skipped_version: Option<String>,
+    /// The newest version the last check found, or `None` when it found none.
+    ///
+    /// Cached so a launch inside the throttle window can still offer an update
+    /// it already knows about, instead of staying silent until the next check is
+    /// due.
+    #[serde(default)]
+    pub available_version: Option<String>,
     /// Keep the tray icon and hide the window instead of exiting when it is
     /// closed. Off by default: closing a window should normally close it.
     #[serde(default)]

@@ -508,10 +508,13 @@ impl Databaser {
             entity
                 .update(cx, |this, cx| {
                     this.settings.record_update_check();
-                    this.settings.save();
 
                     match result {
                         Ok(Some(version)) => {
+                            // Remember what we found, so a later launch inside
+                            // the throttle window can show it without asking
+                            // GitHub again.
+                            this.settings.available_version = Some(version.clone());
                             this.update =
                                 if should_offer_update(manual, &version, skipped.as_deref()) {
                                     UpdateState::Available(version)
@@ -520,6 +523,7 @@ impl Databaser {
                                 };
                         }
                         Ok(None) => {
+                            this.settings.available_version = None;
                             this.update = UpdateState::Idle;
                             if manual {
                                 this.push_toast(
@@ -532,12 +536,16 @@ impl Databaser {
                             }
                         }
                         Err(error) => {
+                            // A failed check learns nothing, so leave whatever
+                            // was cached from the last successful one.
                             this.update = UpdateState::Idle;
                             if manual {
                                 this.push_toast(ToastKind::Error, error.to_string());
                             }
                         }
                     }
+
+                    this.settings.save();
                     cx.notify();
                 })
                 .ok();
@@ -555,6 +563,22 @@ impl Databaser {
                 .update(cx, |this, cx| {
                     if this.settings.update_check_due() {
                         this.check_updates(cx, false);
+                        return;
+                    }
+
+                    // Inside the throttle window: no network call, but still
+                    // show an update a previous check already found. Without
+                    // this, closing and reopening the app hid a known update
+                    // until the next check came due.
+                    let Some(cached) = this.settings.available_version.clone() else {
+                        return;
+                    };
+                    let skipped = this.settings.skipped_version.clone();
+                    if is_newer(&cached, env!("CARGO_PKG_VERSION"))
+                        && should_offer_update(false, &cached, skipped.as_deref())
+                    {
+                        this.update = UpdateState::Available(cached);
+                        cx.notify();
                     }
                 })
                 .ok();
@@ -1453,6 +1477,27 @@ fn flush_toasts(
     }
 }
 
+/// Whether `candidate` is a later release than `current`.
+///
+/// Compares the dotted numeric parts. Anything unparsable - a prerelease tag,
+/// say - counts as not-later, so a surprising tag can never raise a prompt.
+/// Needed because the cached version is compared here rather than by the
+/// updater, which is what normally does this against the running build.
+fn is_newer(candidate: &str, current: &str) -> bool {
+    fn parts(version: &str) -> Option<Vec<u64>> {
+        version
+            .trim_start_matches('v')
+            .split('.')
+            .map(|part| part.parse::<u64>().ok())
+            .collect()
+    }
+
+    match (parts(candidate), parts(current)) {
+        (Some(candidate), Some(current)) => candidate > current,
+        _ => false,
+    }
+}
+
 /// Whether an available version should be surfaced to the user.
 ///
 /// A manual check always reports what it found, including a version the user
@@ -1500,9 +1545,27 @@ pub fn apply_theme(pref: ThemePreference, window: Option<&mut Window>, cx: &mut 
 
 #[cfg(test)]
 mod tests {
-    use super::{should_offer_update, start_type_message, REPOSITORY_URL};
+    use super::{is_newer, should_offer_update, start_type_message, REPOSITORY_URL};
     use crate::services::StartType;
     use crate::update::{REPO_NAME, REPO_OWNER};
+
+    #[test]
+    fn a_cached_version_newer_than_ours_is_offered() {
+        assert!(is_newer("0.3.0", "0.2.1"));
+        assert!(is_newer("v0.2.2", "0.2.1"));
+    }
+
+    #[test]
+    fn a_cached_version_we_already_run_is_not_offered() {
+        assert!(!is_newer("0.2.1", "0.2.1"));
+        assert!(!is_newer("0.1.9", "0.2.1"));
+    }
+
+    #[test]
+    fn an_unparsable_cached_version_is_not_offered() {
+        assert!(!is_newer("0.3.0-rc1", "0.2.1"));
+        assert!(!is_newer("nightly", "0.2.1"));
+    }
 
     #[test]
     fn disabling_a_running_service_says_it_keeps_running() {

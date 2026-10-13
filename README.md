@@ -196,7 +196,9 @@ replaces the executable; the running process keeps the old binary until it is
 restarted, so the app then offers **Restart**.
 
 Databaser also checks **automatically a few seconds after launch, at most once a
-day** (the last check is cached in `settings.json`). The automatic check is
+day**. Both the check and the version it found are cached in `settings.json`, so
+reopening the app inside that window still offers an update it already knows
+about, without asking GitHub again. The automatic check is
 silent: it reports nothing when there is no update and ignores network errors —
 only the manual menu action surfaces those. Dismissing a banner with the **×**
 remembers that version, so launch checks will not raise it again (a newer
